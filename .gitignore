@@ -1,4 +1,5 @@
 *
-!main.cpp
+!*.h
+!*.cpp
 !README.md
 !CMakeLists.txt

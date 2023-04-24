@@ -1,5 +1,4 @@
-#include <iostream>
-#include <fstream>
+#include <auth.h>
 #include <openssl/rsa.h>
 #include <openssl/pem.h>
 #include <openssl/err.h>
@@ -10,16 +9,19 @@
 #include <string.h>
 #include <vector>
 #include <algorithm>
-#include <sstream>
 #include <filesystem>
 #include <regex>
+#include <iostream>
+#include <sstream>
 #include <fstream>
 #include <iomanip>
 #include <openssl/sha.h>
-#include <jsoncpp/json/json.h>
 #include <sys/types.h>
+#include <jsoncpp/json/json.h>
+
 
 using namespace std;
+using namespace auth;
 
 
 string csprng() {
@@ -37,36 +39,6 @@ string csprng() {
     }
 
     return result_stream.str();
-}
-
-// Read metadata.json, use sha value as key to get back the file or directory name
-string sha256_to_name(string sha) {
-    ifstream ifs("metadata.json");
-    Json::Value metadata;
-    Json::CharReaderBuilder builder;
-    JSONCPP_STRING err;
-    Json::parseFromStream(builder, ifs, &metadata, &err);
-
-    string name = metadata[sha].asString();
-    return name;
-}
-
-// Give it a file or directory name, return the SHA-256 hash value
-string name_to_sha256(string name) {
-    // Append salt before calculating the sha256 hash. So attacker can no longer find the original by checking common hash value websites
-    string salt = sha256_to_name("salt");
-    name += salt;
-    unsigned char hash[SHA256_DIGEST_LENGTH];
-    SHA256_CTX sha256;
-    SHA256_Init(&sha256);
-    SHA256_Update(&sha256, name.c_str(), name.size());
-    SHA256_Final(hash, &sha256);
-    stringstream ss;
-    for(int i = 0; i < SHA256_DIGEST_LENGTH; i++)
-    {
-        ss << hex << setw(2) << setfill('0') << (int)hash[i];
-    }
-    return ss.str();
 }
 
 // In mkfile and mkdir, we need to calculate the key: value pair and store it in metadata.json
@@ -98,8 +70,8 @@ void create_RSA(string key_name) {
 
         string publickey_name = username + "_publickey";
         string privatekey_name = key_name + "_privatekey";
-        string publickey_name_sha = name_to_sha256(publickey_name);
-        string privatekey_name_sha = name_to_sha256(privatekey_name);
+        string publickey_name_sha = auth::name_to_sha256(publickey_name);
+        string privatekey_name_sha = auth::name_to_sha256(privatekey_name);
 
         string publickey_path = "./publickeys/" + publickey_name_sha;
         string privatekey_path = privatekey_name_sha;
@@ -134,16 +106,16 @@ void create_RSA(string key_name) {
         string publickey_name = username + "_publickey";
         string privatekey_name = key_name + "_privatekey";
 
-        string publickey_name_sha = name_to_sha256(publickey_name);
-        string privatekey_name_sha = name_to_sha256(privatekey_name);
+        string publickey_name_sha = auth::name_to_sha256(publickey_name);
+        string privatekey_name_sha = auth::name_to_sha256(privatekey_name);
 
         write_to_metadata(publickey_name_sha, publickey_name);
         write_to_metadata(privatekey_name_sha, privatekey_name);
 
 
-        string publickey_path = "./publickeys/" + name_to_sha256(publickey_name);
-        string privatekey_path = "filesystem/" + name_to_sha256(username) + "/" + name_to_sha256(privatekey_name);
-        string privatekey_foradmin_path = "./privatekeys/" + name_to_sha256(username) ;
+        string publickey_path = "./publickeys/" + auth::name_to_sha256(publickey_name);
+        string privatekey_path = "filesystem/" + auth::name_to_sha256(username) + "/" + auth::name_to_sha256(privatekey_name);
+        string privatekey_foradmin_path = "./privatekeys/" + auth::name_to_sha256(username) ;
         
         RSA   *rsa = NULL;
         FILE  *fp  = NULL;
@@ -174,41 +146,6 @@ void create_RSA(string key_name) {
         fclose(fp2);
     }
 
-}
-
-// This function will read RSA (public or private) keys specified by key_path
-RSA * read_RSAkey(string key_type, string key_path){
-    
-    FILE  *fp  = NULL;
-    RSA   *rsa = NULL;
-
-    fp = fopen(&key_path[0], "rb");
-    if (fp == NULL){
-        //invalid key_name provided
-        return rsa;
-    }
-
-    if (key_type == "public"){
-        PEM_read_RSAPublicKey(fp, &rsa, NULL, NULL);
-        fclose(fp);        
-    } else if (key_type == "private"){
-        PEM_read_RSAPrivateKey(fp, &rsa, NULL, NULL);
-        fclose(fp);
-    }
-    return rsa;
-}
-
-// This function implement RSA public key encryption
-int public_encrypt(int flen, unsigned char* from, unsigned char* to, RSA* key, int padding) {
-    
-    int result = RSA_public_encrypt(flen, from, to, key, padding);
-    return result;
-}
-
-// This function implement RSA private key decryption
-int private_decrypt(int flen, unsigned char* from, unsigned char* to, RSA* key, int padding) {
-    int result = RSA_private_decrypt(flen, from, to, key, padding);
-    return result;
 }
 
 // Write encrypted content into a file stored locally
@@ -263,64 +200,7 @@ void initial_adminkey_setup() {
     cout << "./fileserver " << key_name << endl << endl;
 }
 
-int login_authentication(string key_name){
-    RSA *private_key;
-    RSA *public_key;
-    string public_key_path, private_key_path, username;
 
-    size_t pos = key_name.find("_");
-    username = key_name.substr(0,pos);
-
-    string publickey_name = username + "_publickey";
-    string privatekey_name = key_name + "_privatekey";
-    
-    public_key_path = "./publickeys/" + name_to_sha256(publickey_name);
-    public_key = read_RSAkey("public", public_key_path);    
-
-    if (username == "Admin"){
-        private_key_path = name_to_sha256(privatekey_name);
-    } else {
-        private_key_path = "./filesystem/" + name_to_sha256(username) + "/" + name_to_sha256(privatekey_name);
-    }
-    private_key = read_RSAkey("private", private_key_path);
-    
-    if (public_key == NULL || private_key == NULL){
-        //not such key by searching the provided key_name
-        // cout << "Invalid key_name is provided. Fileserver closed." << endl;
-        return 1;
-    } else {
-        // Successfully read public key and private key. Now User authentication
-        // We uses private key to decrypt a message that was encrypted with the corresponding public key.
-        // If the decryption is successful, the user is authenticated and can proceed with the session.
-
-        char message[] = "My secret";
-        char *encrypt = NULL;
-        char *decrypt = NULL;
-
-        // Do RSA encryption using public key
-        encrypt = (char*)malloc(RSA_size(public_key));
-        int encrypt_length = public_encrypt(strlen(message) + 1, (unsigned char*)message, (unsigned char*)encrypt, public_key, RSA_PKCS1_OAEP_PADDING);
-        if(encrypt_length == -1) {
-            // cout << "An error occurred in public_encrypt() method" << endl;
-            return 1;
-        }
-        
-        // Try to do RSA decryption using corresponding private key
-        decrypt = (char *)malloc(encrypt_length);
-        int decrypt_length = private_decrypt(encrypt_length, (unsigned char*)encrypt, (unsigned char*)decrypt, private_key, RSA_PKCS1_OAEP_PADDING);
-        if(decrypt_length == -1) {
-            // cout << "An error occurred in private_decrypt() method" << endl;
-            return 1;
-        }
-        if (strcmp(decrypt, message) == 0){
-            // cout << "Successfully login" << endl;
-            // cout << decrypt << endl;
-            return 0;
-        } else {
-            return 1;
-        }
-    }
-}
 
 vector<string> split_string(const std::string& ipstr, const std::string& delimiter)
 {
@@ -345,9 +225,9 @@ bool check_invalid_username(string username){
 }
 
 int user_folder_setup(string new_username){
-    string root_folder_path = "filesystem/" + name_to_sha256(new_username);
-    string personal_folder_path = root_folder_path + "/" + name_to_sha256("personal");
-    string shared_folder_path = root_folder_path + "/" + name_to_sha256("shared");
+    string root_folder_path = "filesystem/" + auth::name_to_sha256(new_username);
+    string personal_folder_path = root_folder_path + "/" + auth::name_to_sha256("personal");
+    string shared_folder_path = root_folder_path + "/" + auth::name_to_sha256("shared");
 
     int status1 = mkdir(&root_folder_path[0], 0777);
     int status2 = mkdir(&personal_folder_path[0], 0777);
@@ -355,7 +235,7 @@ int user_folder_setup(string new_username){
 
     if (status1 == 0 && status2 == 0 && status3 == 0){
         cout << "User " << new_username << " folders created successfully" << endl << endl;
-        write_to_metadata(name_to_sha256(new_username),new_username);
+        write_to_metadata(auth::name_to_sha256(new_username),new_username);
         return 0;
     } else {
         cerr << "Failed to create user folders. Please check permission and try again " << endl;
@@ -400,17 +280,17 @@ void command_pwd(vector<string>& dir) {
 
 void command_mkfile(const std::string& username, const std::string& filename, const std::string& curr_dir, const std::string& contents)
 {
-    string hashed_filename = name_to_sha256(filename);
+    string hashed_filename = auth::name_to_sha256(filename);
     write_to_metadata(hashed_filename, filename);
-    std::string full_path = "filesystem/" + name_to_sha256(username) + "/" + curr_dir + hashed_filename;
+    std::string full_path = "filesystem/" + auth::name_to_sha256(username) + "/" + curr_dir + hashed_filename;
 
     char *message = new char[contents.length() + 1];
     strcpy(message, contents.c_str());
 
     char *encrypt;
 
-    string public_key_path = "./publickeys/" + name_to_sha256(username + "_publickey");
-    RSA *public_key = read_RSAkey("public", public_key_path);
+    string public_key_path = "./publickeys/" + auth::name_to_sha256(username + "_publickey");
+    RSA *public_key = auth::read_RSAkey("public", public_key_path);
 
     if (public_key == NULL)
     {
@@ -419,7 +299,7 @@ void command_mkfile(const std::string& username, const std::string& filename, co
     }
 
     encrypt = (char*)malloc(RSA_size(public_key));
-    int encrypt_length = public_encrypt(strlen(message) + 1, (unsigned char*)message, (unsigned char*)encrypt, public_key, RSA_PKCS1_OAEP_PADDING);
+    int encrypt_length = auth::public_encrypt(strlen(message) + 1, (unsigned char*)message, (unsigned char*)encrypt, public_key, RSA_PKCS1_OAEP_PADDING);
     if(encrypt_length == -1) {
         cout << "An error occurred in public_encrypt() method" << endl;
         return;
@@ -428,22 +308,22 @@ void command_mkfile(const std::string& username, const std::string& filename, co
     create_encrypted_file(full_path, encrypt, public_key);
 
     // check for expected shared file and update it
-    string expected_path_suffix = "/" + name_to_sha256("shared") + "/" + name_to_sha256(username) + "/" + hashed_filename;
+    string expected_path_suffix = "/" + auth::name_to_sha256("shared") + "/" + auth::name_to_sha256(username) + "/" + hashed_filename;
     for (const auto & entry : filesystem::directory_iterator("./filesystem")) {
         string full_path = entry.path();
-        string shared_user = sha256_to_name(full_path.substr(13));
+        string shared_user = auth::sha256_to_name(full_path.substr(13));
         full_path += expected_path_suffix;
         // cout << full_path << endl;
         if (filesystem::exists(full_path)) {
             RSA *target_public_key;
-            target_public_key = read_RSAkey("public", "./publickeys/" + name_to_sha256(shared_user + "_publickey"));
+            target_public_key = auth::read_RSAkey("public", "./publickeys/" + auth::name_to_sha256(shared_user + "_publickey"));
             if (target_public_key == NULL) {
                 // for some reason, the target's public key is lost so we cannot update it
                 continue;
             }
 
             char *share_encrypted_content = (char*)malloc(RSA_size(target_public_key));
-            int share_encrypt_length = public_encrypt(contents.length() + 1, (unsigned char*)contents.c_str(), (unsigned char*)share_encrypted_content, target_public_key, RSA_PKCS1_OAEP_PADDING);
+            int share_encrypt_length = auth::public_encrypt(contents.length() + 1, (unsigned char*)contents.c_str(), (unsigned char*)share_encrypted_content, target_public_key, RSA_PKCS1_OAEP_PADDING);
             if (share_encrypt_length == -1) {
                 // failed to encrypt
                 continue;
@@ -459,8 +339,8 @@ void command_mkfile(const std::string& username, const std::string& filename, co
 
 std::string command_cat(const std::string& username, const std::string& filename, const std::string& curr_dir, const std::string& key_name)
 {
-    string hashed_filename = name_to_sha256(filename);
-    std::string full_path = "filesystem/" + name_to_sha256(username) + "/" + curr_dir + hashed_filename;
+    string hashed_filename = auth::name_to_sha256(filename);
+    std::string full_path = "filesystem/" + auth::name_to_sha256(username) + "/" + curr_dir + hashed_filename;
 
     struct stat s;
     if(stat(full_path.c_str(), &s) == 0)
@@ -483,8 +363,8 @@ std::string command_cat(const std::string& username, const std::string& filename
     size_t length = infile.tellg();
     infile.seekg(0, std::ios::beg);
 
-    string public_key_path = "./publickeys/" + name_to_sha256(username + "_publickey");
-    RSA *public_key = read_RSAkey("public", public_key_path);
+    string public_key_path = "./publickeys/" + auth::name_to_sha256(username + "_publickey");
+    RSA *public_key = auth::read_RSAkey("public", public_key_path);
 
     if (public_key == NULL)
     {
@@ -500,8 +380,8 @@ std::string command_cat(const std::string& username, const std::string& filename
 
     std::string private_key_path;
     RSA *private_key;
-    private_key_path = "./filesystem/" + name_to_sha256(username) + "/" + name_to_sha256(key_name + "_privatekey");
-    private_key = read_RSAkey("private", private_key_path);
+    private_key_path = "./filesystem/" + auth::name_to_sha256(username) + "/" + auth::name_to_sha256(key_name + "_privatekey");
+    private_key = auth::read_RSAkey("private", private_key_path);
 
     decrypt = (char*)malloc(RSA_size(public_key));
 
@@ -511,7 +391,7 @@ std::string command_cat(const std::string& username, const std::string& filename
         return "";
     }
 
-    int decrypt_length = private_decrypt(RSA_size(private_key), (unsigned char*)contentss, (unsigned char*)decrypt, private_key, RSA_PKCS1_OAEP_PADDING);
+    int decrypt_length = auth::private_decrypt(RSA_size(private_key), (unsigned char*)contentss, (unsigned char*)decrypt, private_key, RSA_PKCS1_OAEP_PADDING);
     if(decrypt_length == -1) {
         cout << "An error occurred in private_decrypt() method" << endl;
     }
@@ -523,7 +403,7 @@ std::string command_cat(const std::string& username, const std::string& filename
 
 std::string command_cat_admin(const std::string& username, const std::string& filename, const std::string& curr_dir, const std::string& key_name)
 {
-    string hashed_filename = name_to_sha256(filename);
+    string hashed_filename = auth::name_to_sha256(filename);
     std::string full_path = "filesystem/" + curr_dir + hashed_filename;
 
     struct stat s;
@@ -547,8 +427,8 @@ std::string command_cat_admin(const std::string& username, const std::string& fi
     size_t length = infile.tellg();
     infile.seekg(0, std::ios::beg);
 
-    string public_key_path = "./publickeys/" + name_to_sha256(username + "_publickey");
-    RSA *public_key = read_RSAkey("public", public_key_path);
+    string public_key_path = "./publickeys/" + auth::name_to_sha256(username + "_publickey");
+    RSA *public_key = auth::read_RSAkey("public", public_key_path);
 
     if (public_key == NULL)
     {
@@ -564,9 +444,9 @@ std::string command_cat_admin(const std::string& username, const std::string& fi
 
     std::string private_key_path;
     RSA *private_key;
-    private_key_path = "./privatekeys/" + name_to_sha256(username);
+    private_key_path = "./privatekeys/" + auth::name_to_sha256(username);
 
-    private_key = read_RSAkey("private", private_key_path);
+    private_key = auth::read_RSAkey("private", private_key_path);
 
     decrypt = (char*)malloc(RSA_size(public_key));
 
@@ -576,7 +456,7 @@ std::string command_cat_admin(const std::string& username, const std::string& fi
         return "";
     }
 
-    int decrypt_length = private_decrypt(RSA_size(private_key), (unsigned char*)contentss, (unsigned char*)decrypt, private_key, RSA_PKCS1_OAEP_PADDING);
+    int decrypt_length = auth::private_decrypt(RSA_size(private_key), (unsigned char*)contentss, (unsigned char*)decrypt, private_key, RSA_PKCS1_OAEP_PADDING);
     if(decrypt_length == -1) {
         cout << "An error occurred in private_decrypt() method" << endl;
     }
@@ -621,11 +501,11 @@ void command_cd(vector<string>& dir, string change_dir, string username) {
     // convert new directory to string in order to use std::filesystem functions
     string check_dir = filesystem::current_path().string() + "/" + "filesystem";
     if (username != "Admin") {
-        check_dir = check_dir + "/" + name_to_sha256(username);
+        check_dir = check_dir + "/" + auth::name_to_sha256(username);
     }
     for (string str : new_dir) {
         if (!str.empty()) {
-            check_dir = check_dir + "/" + name_to_sha256(str);
+            check_dir = check_dir + "/" + auth::name_to_sha256(str);
         }
     }
     // cout << "TEST: " << check_dir << endl;
@@ -681,12 +561,12 @@ void command_sharefile(string username, string key_name, vector<string>& dir, st
     // check file exists by reading it
     string hashed_pwd;
     for (int i = 0; i < dir.size(); i++) {
-        string hashed_dir = name_to_sha256(dir[i]);
+        string hashed_dir = auth::name_to_sha256(dir[i]);
         hashed_pwd += "/" + hashed_dir;
     }
 
-    string hashed_username = name_to_sha256(username);
-    string hashed_filename = name_to_sha256(filename);
+    string hashed_username = auth::name_to_sha256(username);
+    string hashed_filename = auth::name_to_sha256(filename);
     string filepath = "./filesystem/" + hashed_username + hashed_pwd + "/" + hashed_filename;
 
     struct stat s;
@@ -722,8 +602,8 @@ void command_sharefile(string username, string key_name, vector<string>& dir, st
     }
     
     RSA *private_key;
-    string private_key_path = "./filesystem/" + hashed_username + "/" + name_to_sha256(key_name + "_privatekey");
-    private_key = read_RSAkey("private", private_key_path);
+    string private_key_path = "./filesystem/" + hashed_username + "/" + auth::name_to_sha256(key_name + "_privatekey");
+    private_key = auth::read_RSAkey("private", private_key_path);
     if (private_key == NULL) {
         cout << "Error! Private key not found or invalid" << endl;
         return;
@@ -735,8 +615,8 @@ void command_sharefile(string username, string key_name, vector<string>& dir, st
 
     // check that target username exists (a valid user have a public key)
     RSA *target_public_key;
-    string hashed_target_username = name_to_sha256(target_username);
-    target_public_key = read_RSAkey("public", "./publickeys/" + name_to_sha256(target_username + "_publickey"));
+    string hashed_target_username = auth::name_to_sha256(target_username);
+    target_public_key = auth::read_RSAkey("public", "./publickeys/" + auth::name_to_sha256(target_username + "_publickey"));
     if (target_public_key == NULL) {
         cout << "Error! Public key not found or invalid" << endl;
         return;
@@ -748,7 +628,7 @@ void command_sharefile(string username, string key_name, vector<string>& dir, st
 
     // decrypt file for copying
     char *decrypted_file_content = new char[full_size];
-    int decrypt_length = private_decrypt(full_size, (unsigned char*)file_content, (unsigned char*)decrypted_file_content, private_key, RSA_PKCS1_OAEP_PADDING);
+    int decrypt_length = auth::private_decrypt(full_size, (unsigned char*)file_content, (unsigned char*)decrypted_file_content, private_key, RSA_PKCS1_OAEP_PADDING);
     if (decrypt_length == -1) {
         cout << "An error occurred during file share" << endl;
         return;
@@ -756,14 +636,14 @@ void command_sharefile(string username, string key_name, vector<string>& dir, st
 
     // encrypt shared file with target's public key
     char *share_encrypted_content = (char*)malloc(RSA_size(target_public_key));
-    int share_encrypt_length = public_encrypt(strlen(decrypted_file_content) + 1, (unsigned char*)decrypted_file_content, (unsigned char*)share_encrypted_content, target_public_key, RSA_PKCS1_OAEP_PADDING);
+    int share_encrypt_length = auth::public_encrypt(strlen(decrypted_file_content) + 1, (unsigned char*)decrypted_file_content, (unsigned char*)share_encrypted_content, target_public_key, RSA_PKCS1_OAEP_PADDING);
     if (share_encrypt_length == -1) {
         cout << "An error occurred during file share" << endl;
         return;
     }
 
     // directory exists?
-    string target_share_directory = "./filesystem/" + hashed_target_username + "/" + name_to_sha256("shared") +"/" + hashed_username;
+    string target_share_directory = "./filesystem/" + hashed_target_username + "/" + auth::name_to_sha256("shared") +"/" + hashed_username;
     // cout << "Target directory:" << target_share_directory << endl;
     if (!filesystem::is_directory(filesystem::status(target_share_directory))) {
         int dir_create_status = mkdir(&target_share_directory[0], 0777);
@@ -782,7 +662,7 @@ void command_sharefile(string username, string key_name, vector<string>& dir, st
 void command_mkdir(vector<string>& dir, string new_dir, string username) {
     string cur_dir;
     for (string str:dir) {
-        cur_dir = cur_dir + '/' + name_to_sha256(str);
+        cur_dir = cur_dir + '/' + auth::name_to_sha256(str);
     }
 
     if (new_dir.find(".") != -1 or new_dir.find("..") != -1 or new_dir.find("/") != -1){
@@ -792,13 +672,13 @@ void command_mkdir(vector<string>& dir, string new_dir, string username) {
 
     if(username != "Admin"){
         if (!dir.empty()){
-            if (cur_dir.substr(1,65) == name_to_sha256("shared"))
+            if (cur_dir.substr(1,65) == auth::name_to_sha256("shared"))
             {
                 cout << "Forbidden: Cannot create directory in /shared" << endl;
             }
             else{
-                write_to_metadata(name_to_sha256(new_dir),new_dir);
-                new_dir = std::filesystem::current_path().string() + "/filesystem/" + name_to_sha256(username) + '/' + cur_dir.substr(1) + '/' + name_to_sha256(new_dir);
+                write_to_metadata(auth::name_to_sha256(new_dir),new_dir);
+                new_dir = std::filesystem::current_path().string() + "/filesystem/" + auth::name_to_sha256(username) + '/' + cur_dir.substr(1) + '/' + auth::name_to_sha256(new_dir);
 
                 char* dirname = strdup(new_dir.c_str());
                 if (mkdir(dirname, 0777) == -1)
@@ -827,11 +707,11 @@ void command_ls(vector<string>&dir, string username){
         cur_dir = std::filesystem::current_path().string() + "/filesystem/";
     }
     else{
-        cur_dir = std::filesystem::current_path().string() + "/filesystem/" + name_to_sha256(username);
+        cur_dir = std::filesystem::current_path().string() + "/filesystem/" + auth::name_to_sha256(username);
     }
     for (string str : dir) {
         if (!str.empty()) {
-            cur_dir = cur_dir + '/' + name_to_sha256(str);
+            cur_dir = cur_dir + '/' + auth::name_to_sha256(str);
             upper_dir = true;
         }
     }
@@ -853,9 +733,9 @@ void command_ls(vector<string>&dir, string username){
         }
         string display_path;
         if (sub_path[0] == '/') {
-            display_path = sha256_to_name(full_path.substr(cur_dir.length() + 1));
+            display_path = auth::sha256_to_name(full_path.substr(cur_dir.length() + 1));
         } else {
-            display_path = sha256_to_name(full_path.substr(cur_dir.length()));
+            display_path = auth::sha256_to_name(full_path.substr(cur_dir.length()));
         }
         if (display_path != ""){
             std::cout << prefix + display_path << endl;
@@ -937,8 +817,8 @@ int main(int argc, char** argv) {
         string random_salt = csprng();
         write_to_metadata("salt", random_salt);
 
-        write_to_metadata(name_to_sha256("personal"), "personal");
-        write_to_metadata(name_to_sha256("shared"), "shared");
+        write_to_metadata(auth::name_to_sha256("personal"), "personal");
+        write_to_metadata(auth::name_to_sha256("shared"), "shared");
 
         initial_adminkey_setup();
 
@@ -953,7 +833,7 @@ int main(int argc, char** argv) {
         // Time to do user authentication
 
         key_name = argv[1];
-        int login_result = login_authentication(key_name);
+        int login_result = auth::login_authentication(key_name);
         if (login_result == 1){
             cout << "Invalid key_name is provided. Fileserver closed." << endl;
             return 1;
@@ -1024,7 +904,7 @@ int main(int argc, char** argv) {
             std::string curr_dir_hashed;
             for (const string& str:dir) {
                 curr_dir.append(str);
-                curr_dir_hashed.append(name_to_sha256(str));
+                curr_dir_hashed.append(auth::name_to_sha256(str));
                 curr_dir.append("/");
                 curr_dir_hashed.append("/");
             }
@@ -1071,7 +951,7 @@ int main(int argc, char** argv) {
             std::string curr_dir_hashed;
             for (const string& str:dir) {
                 curr_dir.append(str);
-                curr_dir_hashed.append(name_to_sha256(str));
+                curr_dir_hashed.append(auth::name_to_sha256(str));
                 curr_dir.append("/");
                 curr_dir_hashed.append("/");
             }
@@ -1139,7 +1019,7 @@ int main(int argc, char** argv) {
                 continue;
             }
             struct stat st;
-            string root_folder_path = "filesystem/" + name_to_sha256(new_username);
+            string root_folder_path = "filesystem/" + auth::name_to_sha256(new_username);
             if (stat(&root_folder_path[0], &st) != -1){
                 cout << "User " << new_username << " already exists" << endl;
                 continue;
