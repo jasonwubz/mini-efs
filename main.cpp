@@ -1,4 +1,5 @@
 #include <auth.h>
+#include <command.h>
 #include <openssl/rsa.h>
 #include <openssl/pem.h>
 #include <openssl/err.h>
@@ -21,132 +22,6 @@
 
 
 using namespace std;
-using namespace auth;
-
-
-string csprng() {
-    constexpr size_t rsize = 32;
-    unsigned char ran_buf[rsize];
-    ostringstream result_stream;
-
-    if (RAND_bytes(ran_buf, rsize) != 1) {
-        cout << "Error generating private key name";
-        return "";
-    }
-
-    for (size_t i = 0; i < rsize; i++) {
-        result_stream << hex << setw(2) << setfill('0') << static_cast<int>(ran_buf[i]);
-    }
-
-    return result_stream.str();
-}
-
-// In mkfile and mkdir, we need to calculate the key: value pair and store it in metadata.json
-void write_to_metadata(string sha, string name) {
-    ifstream ifs("metadata.json");
-    Json::Value metadata;
-    Json::CharReaderBuilder builder;
-    JSONCPP_STRING err;
-    Json::parseFromStream(builder, ifs, &metadata, &err);
-    
-    // Add a new key-value pair to the Json::Value object
-    metadata[sha] = name;
-
-    // Write the modified Json::Value object back to the JSON file
-    ofstream ofs("metadata.json");
-    Json::StreamWriterBuilder writerBuilder;
-    unique_ptr<Json::StreamWriter> writer(writerBuilder.newStreamWriter());
-    writer->write(metadata, &ofs);
-}
-
-// This function will create public/private key pairs under /publickeys folder and /privatekeys folder
-// keyfile's naming convension: username_randomnumber_publickey and username_randomnumber_privatekey
-// Example: Admin_2018509453_privatekey
-void create_RSA(string key_name) {
-    size_t pos = key_name.find("_");
-    string username = key_name.substr(0,pos);
-
-    if (username == "Admin") {
-
-        string publickey_name = username + "_publickey";
-        string privatekey_name = key_name + "_privatekey";
-        string publickey_name_sha = auth::name_to_sha256(publickey_name);
-        string privatekey_name_sha = auth::name_to_sha256(privatekey_name);
-
-        string publickey_path = "./publickeys/" + publickey_name_sha;
-        string privatekey_path = privatekey_name_sha;
-
-        write_to_metadata(publickey_name_sha, publickey_name);
-        write_to_metadata(privatekey_name_sha, privatekey_name);
-        
-        RSA   *rsa = NULL;
-        FILE  *fp  = NULL;
-        FILE  *fp1  = NULL;
-
-        BIGNUM *bne = NULL;
-        bne = BN_new();
-        BN_set_word(bne, 59);
-
-        RSA *keypair = NULL;
-        keypair = RSA_new();
-        //2048 bit key
-        RSA_generate_key_ex(keypair, 4096, bne, NULL);
-
-        //generate public key and store to local
-        fp = fopen(&publickey_path[0], "w");
-        PEM_write_RSAPublicKey(fp, keypair);
-        fclose(fp);
-        
-        //generate private key and store to local
-        fp1 = fopen(&privatekey_path[0], "w");
-        PEM_write_RSAPrivateKey(fp1, keypair, NULL, NULL, 0, NULL, NULL);
-        fclose(fp1);
-    } else {
-        // normal user's public key & private key file creation
-        string publickey_name = username + "_publickey";
-        string privatekey_name = key_name + "_privatekey";
-
-        string publickey_name_sha = auth::name_to_sha256(publickey_name);
-        string privatekey_name_sha = auth::name_to_sha256(privatekey_name);
-
-        write_to_metadata(publickey_name_sha, publickey_name);
-        write_to_metadata(privatekey_name_sha, privatekey_name);
-
-
-        string publickey_path = "./publickeys/" + auth::name_to_sha256(publickey_name);
-        string privatekey_path = "filesystem/" + auth::name_to_sha256(username) + "/" + auth::name_to_sha256(privatekey_name);
-        string privatekey_foradmin_path = "./privatekeys/" + auth::name_to_sha256(username) ;
-        
-        RSA   *rsa = NULL;
-        FILE  *fp  = NULL;
-        FILE  *fp1  = NULL;
-        FILE  *fp2  = NULL;
-
-        BIGNUM *bne = NULL;
-        bne = BN_new();
-        BN_set_word(bne, 59);
-
-        RSA *keypair = NULL;
-        keypair = RSA_new();
-        RSA_generate_key_ex(keypair, 4096, bne, NULL);
-
-        //generate public key and store to local
-        fp = fopen(&publickey_path[0], "w");
-        PEM_write_RSAPublicKey(fp, keypair);
-        fclose(fp);
-        
-        //generate private key and store to local
-        fp1 = fopen(&privatekey_path[0], "w");
-        PEM_write_RSAPrivateKey(fp1, keypair, NULL, NULL, 0, NULL, NULL);
-        fclose(fp1);
-
-        //Store a copy of private key in privatekeys for admin usage only
-        fp2 = fopen(&privatekey_foradmin_path[0], "w");
-        PEM_write_RSAPrivateKey(fp2, keypair, NULL, NULL, 0, NULL, NULL);
-        fclose(fp2);
-    }
-
-}
 
 // Write encrypted content into a file stored locally
 void create_encrypted_file(string filename, char* encrypted_content, RSA* key_pair) {
@@ -187,20 +62,18 @@ int initial_folder_setup(){
 void initial_adminkey_setup() {
     string username = "Admin";
 
-    string random_byte_hex = csprng();
+    string random_byte_hex = auth::csprng();
     if (random_byte_hex.length() == 0) {
         return;
     }
     string key_name = username + "_" + random_byte_hex;
 
-    create_RSA(key_name);
+    auth::create_RSA(key_name);
     cout << "Admin Public/Private key pair has been created." << endl;
     cout << "Your private key_name is " << key_name << endl;
     cout << "Please store your key_name safely. Admin can login by command: " << endl;
     cout << "./fileserver " << key_name << endl << endl;
 }
-
-
 
 vector<string> split_string(const std::string& ipstr, const std::string& delimiter)
 {
@@ -217,55 +90,15 @@ vector<string> split_string(const std::string& ipstr, const std::string& delimit
     return splits;
 }
 
-bool check_invalid_username(string username){
+bool check_invalid_username(string username) {
     for(int i=0;i<username.length();i++){
         if(!std::isalpha(username[i]) && !std::isdigit(username[i])) {return false;}
     }
     return true;
 }
 
-int user_folder_setup(string new_username){
-    string root_folder_path = "filesystem/" + auth::name_to_sha256(new_username);
-    string personal_folder_path = root_folder_path + "/" + auth::name_to_sha256("personal");
-    string shared_folder_path = root_folder_path + "/" + auth::name_to_sha256("shared");
-
-    int status1 = mkdir(&root_folder_path[0], 0777);
-    int status2 = mkdir(&personal_folder_path[0], 0777);
-    int status3 = mkdir(&shared_folder_path[0], 0777);
-
-    if (status1 == 0 && status2 == 0 && status3 == 0){
-        cout << "User " << new_username << " folders created successfully" << endl << endl;
-        write_to_metadata(auth::name_to_sha256(new_username),new_username);
-        return 0;
-    } else {
-        cerr << "Failed to create user folders. Please check permission and try again " << endl;
-        return 1;
-    }
-}
-
-void cmd_adduser(string new_username) {
-    // create user folders
-    int result = user_folder_setup(new_username);
-    if (result) {
-        return;
-    }
-
-    // create users RSA public key and private keys (2 copies)
-    string random_byte_hex = csprng();
-    if (random_byte_hex.length() == 0) {
-        return;
-    }
-    string key_name = new_username + "_" + random_byte_hex;
-    create_RSA(key_name);
-    cout << "User " << new_username << " Public/Private key pair has been created." << endl;
-    cout << "The private key_name is " << key_name << endl;
-    cout << "Please give this key_name to user and let user know that it must be remained secret to him/herself only." << endl;
-    cout << "User " << new_username << " can login by command: " << endl;
-    cout << "./fileserver " << key_name << endl << endl;
-}
-
-
-void command_pwd(vector<string>& dir) {
+void command_pwd(vector<string>& dir)
+{
     if (dir.empty()) {
         cout << "/";
     }
@@ -280,16 +113,16 @@ void command_pwd(vector<string>& dir) {
 
 void command_mkfile(const std::string& username, const std::string& filename, const std::string& curr_dir, const std::string& contents)
 {
-    string hashed_filename = auth::name_to_sha256(filename);
-    write_to_metadata(hashed_filename, filename);
-    std::string full_path = "filesystem/" + auth::name_to_sha256(username) + "/" + curr_dir + hashed_filename;
+    string hashed_filename = auth::hash(filename);
+    auth::write_to_metadata(hashed_filename, filename);
+    std::string full_path = "filesystem/" + auth::hash(username) + "/" + curr_dir + hashed_filename;
 
     char *message = new char[contents.length() + 1];
     strcpy(message, contents.c_str());
 
     char *encrypt;
 
-    string public_key_path = "./publickeys/" + auth::name_to_sha256(username + "_publickey");
+    string public_key_path = "./publickeys/" + auth::hash(username + "_publickey");
     RSA *public_key = auth::read_RSAkey("public", public_key_path);
 
     if (public_key == NULL)
@@ -308,15 +141,15 @@ void command_mkfile(const std::string& username, const std::string& filename, co
     create_encrypted_file(full_path, encrypt, public_key);
 
     // check for expected shared file and update it
-    string expected_path_suffix = "/" + auth::name_to_sha256("shared") + "/" + auth::name_to_sha256(username) + "/" + hashed_filename;
+    string expected_path_suffix = "/" + auth::hash("shared") + "/" + auth::hash(username) + "/" + hashed_filename;
     for (const auto & entry : filesystem::directory_iterator("./filesystem")) {
         string full_path = entry.path();
-        string shared_user = auth::sha256_to_name(full_path.substr(13));
+        string shared_user = auth::hash_to_val(full_path.substr(13));
         full_path += expected_path_suffix;
         // cout << full_path << endl;
         if (filesystem::exists(full_path)) {
             RSA *target_public_key;
-            target_public_key = auth::read_RSAkey("public", "./publickeys/" + auth::name_to_sha256(shared_user + "_publickey"));
+            target_public_key = auth::read_RSAkey("public", "./publickeys/" + auth::hash(shared_user + "_publickey"));
             if (target_public_key == NULL) {
                 // for some reason, the target's public key is lost so we cannot update it
                 continue;
@@ -336,11 +169,10 @@ void command_mkfile(const std::string& username, const std::string& filename, co
     delete[] message;
 }
 
-
 std::string command_cat(const std::string& username, const std::string& filename, const std::string& curr_dir, const std::string& key_name)
 {
-    string hashed_filename = auth::name_to_sha256(filename);
-    std::string full_path = "filesystem/" + auth::name_to_sha256(username) + "/" + curr_dir + hashed_filename;
+    string hashed_filename = auth::hash(filename);
+    std::string full_path = "filesystem/" + auth::hash(username) + "/" + curr_dir + hashed_filename;
 
     struct stat s;
     if(stat(full_path.c_str(), &s) == 0)
@@ -363,7 +195,7 @@ std::string command_cat(const std::string& username, const std::string& filename
     size_t length = infile.tellg();
     infile.seekg(0, std::ios::beg);
 
-    string public_key_path = "./publickeys/" + auth::name_to_sha256(username + "_publickey");
+    string public_key_path = "./publickeys/" + auth::hash(username + "_publickey");
     RSA *public_key = auth::read_RSAkey("public", public_key_path);
 
     if (public_key == NULL)
@@ -380,7 +212,7 @@ std::string command_cat(const std::string& username, const std::string& filename
 
     std::string private_key_path;
     RSA *private_key;
-    private_key_path = "./filesystem/" + auth::name_to_sha256(username) + "/" + auth::name_to_sha256(key_name + "_privatekey");
+    private_key_path = "./filesystem/" + auth::hash(username) + "/" + auth::hash(key_name + "_privatekey");
     private_key = auth::read_RSAkey("private", private_key_path);
 
     decrypt = (char*)malloc(RSA_size(public_key));
@@ -403,7 +235,7 @@ std::string command_cat(const std::string& username, const std::string& filename
 
 std::string command_cat_admin(const std::string& username, const std::string& filename, const std::string& curr_dir, const std::string& key_name)
 {
-    string hashed_filename = auth::name_to_sha256(filename);
+    string hashed_filename = auth::hash(filename);
     std::string full_path = "filesystem/" + curr_dir + hashed_filename;
 
     struct stat s;
@@ -427,7 +259,7 @@ std::string command_cat_admin(const std::string& username, const std::string& fi
     size_t length = infile.tellg();
     infile.seekg(0, std::ios::beg);
 
-    string public_key_path = "./publickeys/" + auth::name_to_sha256(username + "_publickey");
+    string public_key_path = "./publickeys/" + auth::hash(username + "_publickey");
     RSA *public_key = auth::read_RSAkey("public", public_key_path);
 
     if (public_key == NULL)
@@ -444,7 +276,7 @@ std::string command_cat_admin(const std::string& username, const std::string& fi
 
     std::string private_key_path;
     RSA *private_key;
-    private_key_path = "./privatekeys/" + auth::name_to_sha256(username);
+    private_key_path = "./privatekeys/" + auth::hash(username);
 
     private_key = auth::read_RSAkey("private", private_key_path);
 
@@ -499,17 +331,17 @@ void command_cd(vector<string>& dir, string change_dir, string username) {
     }
 
     // convert new directory to string in order to use std::filesystem functions
-    string check_dir = filesystem::current_path().string() + "/" + "filesystem";
+    string check_dir = std::filesystem::current_path().string() + "/" + "filesystem";
     if (username != "Admin") {
-        check_dir = check_dir + "/" + auth::name_to_sha256(username);
+        check_dir = check_dir + "/" + auth::hash(username);
     }
     for (string str : new_dir) {
         if (!str.empty()) {
-            check_dir = check_dir + "/" + auth::name_to_sha256(str);
+            check_dir = check_dir + "/" + auth::hash(str);
         }
     }
     // cout << "TEST: " << check_dir << endl;
-    if ( filesystem::is_directory(filesystem::status(check_dir)) ) {
+    if (std::filesystem::is_directory(std::filesystem::status(check_dir)) ) {
         dir = new_dir;
         cout << "Change directory to: ";
         command_pwd(dir); 
@@ -561,12 +393,12 @@ void command_sharefile(string username, string key_name, vector<string>& dir, st
     // check file exists by reading it
     string hashed_pwd;
     for (int i = 0; i < dir.size(); i++) {
-        string hashed_dir = auth::name_to_sha256(dir[i]);
+        string hashed_dir = auth::hash(dir[i]);
         hashed_pwd += "/" + hashed_dir;
     }
 
-    string hashed_username = auth::name_to_sha256(username);
-    string hashed_filename = auth::name_to_sha256(filename);
+    string hashed_username = auth::hash(username);
+    string hashed_filename = auth::hash(filename);
     string filepath = "./filesystem/" + hashed_username + hashed_pwd + "/" + hashed_filename;
 
     struct stat s;
@@ -602,7 +434,7 @@ void command_sharefile(string username, string key_name, vector<string>& dir, st
     }
     
     RSA *private_key;
-    string private_key_path = "./filesystem/" + hashed_username + "/" + auth::name_to_sha256(key_name + "_privatekey");
+    string private_key_path = "./filesystem/" + hashed_username + "/" + auth::hash(key_name + "_privatekey");
     private_key = auth::read_RSAkey("private", private_key_path);
     if (private_key == NULL) {
         cout << "Error! Private key not found or invalid" << endl;
@@ -615,8 +447,8 @@ void command_sharefile(string username, string key_name, vector<string>& dir, st
 
     // check that target username exists (a valid user have a public key)
     RSA *target_public_key;
-    string hashed_target_username = auth::name_to_sha256(target_username);
-    target_public_key = auth::read_RSAkey("public", "./publickeys/" + auth::name_to_sha256(target_username + "_publickey"));
+    string hashed_target_username = auth::hash(target_username);
+    target_public_key = auth::read_RSAkey("public", "./publickeys/" + auth::hash(target_username + "_publickey"));
     if (target_public_key == NULL) {
         cout << "Error! Public key not found or invalid" << endl;
         return;
@@ -643,9 +475,9 @@ void command_sharefile(string username, string key_name, vector<string>& dir, st
     }
 
     // directory exists?
-    string target_share_directory = "./filesystem/" + hashed_target_username + "/" + auth::name_to_sha256("shared") +"/" + hashed_username;
+    string target_share_directory = "./filesystem/" + hashed_target_username + "/" + auth::hash("shared") +"/" + hashed_username;
     // cout << "Target directory:" << target_share_directory << endl;
-    if (!filesystem::is_directory(filesystem::status(target_share_directory))) {
+    if (!std::filesystem::is_directory(std::filesystem::status(target_share_directory))) {
         int dir_create_status = mkdir(&target_share_directory[0], 0777);
         if (dir_create_status != 0) {
             cout << "An error occurred during file share" << endl;
@@ -662,7 +494,7 @@ void command_sharefile(string username, string key_name, vector<string>& dir, st
 void command_mkdir(vector<string>& dir, string new_dir, string username) {
     string cur_dir;
     for (string str:dir) {
-        cur_dir = cur_dir + '/' + auth::name_to_sha256(str);
+        cur_dir = cur_dir + '/' + auth::hash(str);
     }
 
     if (new_dir.find(".") != -1 or new_dir.find("..") != -1 or new_dir.find("/") != -1){
@@ -672,13 +504,13 @@ void command_mkdir(vector<string>& dir, string new_dir, string username) {
 
     if(username != "Admin"){
         if (!dir.empty()){
-            if (cur_dir.substr(1,65) == auth::name_to_sha256("shared"))
+            if (cur_dir.substr(1,65) == auth::hash("shared"))
             {
                 cout << "Forbidden: Cannot create directory in /shared" << endl;
             }
             else{
-                write_to_metadata(auth::name_to_sha256(new_dir),new_dir);
-                new_dir = std::filesystem::current_path().string() + "/filesystem/" + auth::name_to_sha256(username) + '/' + cur_dir.substr(1) + '/' + auth::name_to_sha256(new_dir);
+                auth::write_to_metadata(auth::hash(new_dir),new_dir);
+                new_dir = std::filesystem::current_path().string() + "/filesystem/" + auth::hash(username) + '/' + cur_dir.substr(1) + '/' + auth::hash(new_dir);
 
                 char* dirname = strdup(new_dir.c_str());
                 if (mkdir(dirname, 0777) == -1)
@@ -697,97 +529,12 @@ void command_mkdir(vector<string>& dir, string new_dir, string username) {
     }
 }
 
-
-void command_ls(vector<string>&dir, string username){
-    // construct current directory string
-    string cur_dir;
-    bool upper_dir = false;
-    cout << "d -> ."<< endl;
-    if (username == "Admin"){
-        cur_dir = std::filesystem::current_path().string() + "/filesystem/";
-    }
-    else{
-        cur_dir = std::filesystem::current_path().string() + "/filesystem/" + auth::name_to_sha256(username);
-    }
-    for (string str : dir) {
-        if (!str.empty()) {
-            cur_dir = cur_dir + '/' + auth::name_to_sha256(str);
-            upper_dir = true;
-        }
-    }
-    if (upper_dir){
-        cout << "d -> .." << endl;
-    }
-    
-    //iterate directory
-    const std::filesystem::path path = std::filesystem::u8path(cur_dir); // sanity check for encoding
-    for (const auto & entry : filesystem::directory_iterator(path)){
-        string prefix;
-        string full_path = entry.path();
-        string sub_path = full_path.substr(cur_dir.length());
-        if (filesystem::is_directory(filesystem::status(full_path))){
-            prefix = "d -> ";
-        }
-        else{
-            prefix = "f -> ";
-        }
-        string display_path;
-        if (sub_path[0] == '/') {
-            display_path = auth::sha256_to_name(full_path.substr(cur_dir.length() + 1));
-        } else {
-            display_path = auth::sha256_to_name(full_path.substr(cur_dir.length()));
-        }
-        if (display_path != ""){
-            std::cout << prefix + display_path << endl;
-        }
-
-    }
-}
-
 bool isWhitespace(std::string s){
     for(int index = 0; index < s.length(); index++){
         if(!std::isspace(s[index]))
             return false;
     }
     return true;
-}
-
-void display_commands(string username) {
-    cout << endl;
-    cout << "Available commands:" << endl;
-    cout << "---------" << endl;
-
-    cout << "cd <directory>                   - Change directory" << endl;
-    cout << "pwd                              - Print the current directory" << endl;
-    cout << "ls                               - List the files and directories in the current directory" << endl;
-    cout << "cat <filename>                   - Print content of the given filename" << endl;
-    
-
-    if (is_admin(username)) {
-        cout << "adduser <username>               - Add new user by given username" << endl;
-    } else {
-        cout << "share <filename> <username>      - Share the file <filename> with the target user <username>" << endl;
-        cout << "mkfile <filename> <contents>     - Create a new file <filename> with the ascii printable contents <contents>" << endl;
-    }
-
-    cout << "exit                             - Terminate the program" << endl;
-    /*
-    `cd <directory>`   -  The user will provide the directory to move to. It should accept `.` and `..` as current and parent directories respectively and support changing multiple directories at once (cd ../../dir1/dir2). cd / should take you to the current user’s root directory. If a directory doesn't exist, the user should stay in the current directory.
-`pwd`   - Print the current directory. Each user should have /personal and /shared base directories. 
-`ls`   -  List the files and directories in the current directory separated by a new line. You need to show the directories `.` and `..` as well. To differentiate between a file and a directory, the output should look as follows
-d -> .
-d -> ..
-d -> directory1
-f -> file1
-`cat <filename>`   - Read the actual (decrypted) contents of the file. If the file doesn't exist, print "<filename> doesn't exist"
-`share <filename> <username>`   -  Share the file with the target user which should appear under the `/shared` directory of the target user. The files are shared only with read permission. The shared directory must be read-only. If the file doesn't exist, print "File <filename> doesn't exist". If the user doesn't exist, print "User <username> doesn't exist". First check will be on the file.
-`mkdir <directory_name>`   - Create a new directory. If a directory with this name exists, print "Directory already exists"
-`mkfile <filename> <contents>`   - Create a new file with the contents. The contents will be printable ascii characters. If a file with <filename> exists, it should replace the contents. If the file was previously shared, the target user should see the new contents of the file.
-`exit`   - Terminate the program.
-Admin specific features
-Admin should have access to read the entire file system with all user features
-`adduser <username>`  - This command should create a keyfile called username_keyfile on the host which will be used by the user to access the filesystem. If a user with this name already exists, print "User <username> already exists"
-    */
 }
 
 int main(int argc, char** argv) {
@@ -814,11 +561,11 @@ int main(int argc, char** argv) {
         if (folder_result == 1) {return 1;}
 
         //Generate random salt value using cryptographically secure random function
-        string random_salt = csprng();
-        write_to_metadata("salt", random_salt);
+        string random_salt = auth::csprng();
+        auth::write_to_metadata("salt", random_salt);
 
-        write_to_metadata(auth::name_to_sha256("personal"), "personal");
-        write_to_metadata(auth::name_to_sha256("shared"), "shared");
+        auth::write_to_metadata(auth::hash("personal"), "personal");
+        auth::write_to_metadata(auth::hash("shared"), "shared");
 
         initial_adminkey_setup();
 
@@ -841,7 +588,7 @@ int main(int argc, char** argv) {
             size_t pos = key_name.find("_");
             username = key_name.substr(0,pos);
             cout << "Welcome! Logged in as " << username << endl;
-            display_commands(username);
+            command::show_help(is_admin(username));
         }
     }
 
@@ -875,7 +622,7 @@ int main(int argc, char** argv) {
         // 3. ls  
         //
         else if (user_command == "ls") {
-            command_ls(dir, username);
+            command::ls(dir, username);
         }
 
         // 4. mkdir  
@@ -904,7 +651,7 @@ int main(int argc, char** argv) {
             std::string curr_dir_hashed;
             for (const string& str:dir) {
                 curr_dir.append(str);
-                curr_dir_hashed.append(auth::name_to_sha256(str));
+                curr_dir_hashed.append(auth::hash(str));
                 curr_dir.append("/");
                 curr_dir_hashed.append("/");
             }
@@ -951,7 +698,7 @@ int main(int argc, char** argv) {
             std::string curr_dir_hashed;
             for (const string& str:dir) {
                 curr_dir.append(str);
-                curr_dir_hashed.append(auth::name_to_sha256(str));
+                curr_dir_hashed.append(auth::hash(str));
                 curr_dir.append("/");
                 curr_dir_hashed.append("/");
             }
@@ -1019,17 +766,14 @@ int main(int argc, char** argv) {
                 continue;
             }
             struct stat st;
-            string root_folder_path = "filesystem/" + auth::name_to_sha256(new_username);
+            string root_folder_path = "filesystem/" + auth::hash(new_username);
             if (stat(&root_folder_path[0], &st) != -1){
                 cout << "User " << new_username << " already exists" << endl;
                 continue;
             }
             //passed all exception checks, now we create new user
-            cmd_adduser(new_username);
-        }
-
-
-        else {
+            command::adduser(new_username);
+        } else {
             cout << "Invalid command." << endl;
         }
 

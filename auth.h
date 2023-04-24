@@ -8,14 +8,17 @@
 
 namespace auth
 {
+    std::string csprng();
     RSA * read_RSAkey(std::string key_type, std::string key_path);
-    //void create_RSA(string key_name);
+    void create_RSA(std::string key_name);
+    void write_to_metadata(std::string sha, std::string name);
     int public_encrypt(int flen, unsigned char* from, unsigned char* to, RSA* key, int padding);
     int private_decrypt(int flen, unsigned char* from, unsigned char* to, RSA* key, int padding);
     int login_authentication(std::string key_name);
     //void initial_adminkey_setup();
-    std::string sha256_to_name(std::string sha);
-    std::string name_to_sha256(std::string name);
+    int user_folder_setup(std::string new_username);
+    std::string hash_to_val(std::string sha);
+    std::string hash(std::string name);
 }
 
 #endif
