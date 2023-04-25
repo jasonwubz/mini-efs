@@ -204,3 +204,60 @@ void command::makedir(std::vector<std::string>& dir, std::string new_dir, std::s
         std::cout << "Invalid command for admin!" << std::endl;
     }
 }
+
+void command::mkfile(const std::string& username, const std::string& filename, const std::string& curr_dir, const std::string& contents)
+{
+    std::string hashed_filename = auth::hash(filename);
+    metadata::write(hashed_filename, filename);
+    std::string full_path = "filesystem/" + auth::hash(username) + "/" + curr_dir + hashed_filename;
+
+    char* message = new char[contents.length() + 1];
+    strcpy(message, contents.c_str());
+
+    char* encrypt;
+
+    std::string public_key_path = "./publickeys/" + auth::hash(username + "_publickey");
+    RSA *public_key = auth::read_RSAkey("public", public_key_path);
+
+    if (public_key == NULL) {
+        std::cout << "Error! Public key not found or invalid" << std::endl;
+        return;
+    }
+
+    encrypt = (char*)malloc(RSA_size(public_key));
+    int encrypt_length = auth::public_encrypt(strlen(message) + 1, (unsigned char*)message, (unsigned char*)encrypt, public_key, RSA_PKCS1_OAEP_PADDING);
+    if (encrypt_length == -1) {
+        std::cout << "An error occurred in public_encrypt() method" << std::endl;
+        return;
+    }
+
+    auth::create_encrypted_file(full_path, encrypt, public_key);
+
+    // check for expected shared file and update it
+    std::string expected_path_suffix = "/" + auth::hash("shared") + "/" + auth::hash(username) + "/" + hashed_filename;
+    for (const auto & entry : std::filesystem::directory_iterator("./filesystem")) {
+        std::string full_path = entry.path();
+        std::string shared_user = auth::hash_to_val(full_path.substr(13));
+        full_path += expected_path_suffix;
+        // cout << full_path << endl;
+        if (std::filesystem::exists(full_path)) {
+            RSA *target_public_key;
+            target_public_key = auth::read_RSAkey("public", "./publickeys/" + auth::hash(shared_user + "_publickey"));
+            if (target_public_key == NULL) {
+                // for some reason, the target's public key is lost so we cannot update it
+                continue;
+            }
+
+            char* share_encrypted_content = (char*)malloc(RSA_size(target_public_key));
+            int share_encrypt_length = auth::public_encrypt(contents.length() + 1, (unsigned char*)contents.c_str(), (unsigned char*)share_encrypted_content, target_public_key, RSA_PKCS1_OAEP_PADDING);
+            if (share_encrypt_length == -1) {
+                // failed to encrypt
+                continue;
+            }
+            auth::create_encrypted_file(full_path, share_encrypted_content, target_public_key);
+            free(share_encrypted_content);
+        }
+    }
+    free(encrypt);
+    delete[] message;
+}

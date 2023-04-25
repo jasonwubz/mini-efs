@@ -71,6 +71,17 @@ RSA * auth::read_RSAkey(std::string key_type, std::string key_path)
     return rsa;
 }
 
+void auth::create_encrypted_file(std::string filename, char* encrypted_content, RSA* key_pair)
+{
+    FILE* encrypted_file = fopen(&filename[0], "wb");
+    if (encrypted_file == nullptr) {
+        std::cout << "Unable to create file, please check directory permissions" << std::endl;
+        return;
+    }
+    fwrite(encrypted_content, sizeof(*encrypted_content), RSA_size(key_pair), encrypted_file);
+    fclose(encrypted_file);
+}
+
 // Read metadata.json, use sha value as key to get back the file or directory name
 std::string auth::hash_to_val(std::string sha) {
     std::ifstream ifs("metadata.json");

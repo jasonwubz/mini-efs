@@ -15,6 +15,7 @@ namespace command
     std::string pwd(std::vector<std::string>& dir);
     void cd(std::vector<std::string>& dir, std::string change_dir, std::string username);
     void makedir(std::vector<std::string>& dir, std::string new_dir, std::string username);
+    void mkfile(const std::string& username, const std::string& filename, const std::string& curr_dir, const std::string& contents);
 }
 
 #endif
