@@ -15,10 +15,10 @@ Compile and prepare the binary:
 cd /your-path-to/mini-efs
 
 # compile headers
-g++ -c -I. auth.cpp command.cpp
+g++ -c -I. auth.cpp command.cpp metadata.cpp
 
 # compile main program as fileserver
-g++ -I. auth.o command.o main.cpp -o fileserver -lcrypto -ljsoncpp
+g++ -I. auth.o command.o metadata.o main.cpp -o fileserver -lcrypto -ljsoncpp
 
 # give execute permission binary
 chmod +x fileserver

@@ -1,10 +1,11 @@
 #include <auth.h>
 #include <command.h>
+#include <metadata.h>
 #include <openssl/rsa.h>
 #include <openssl/pem.h>
 #include <openssl/err.h>
 #include <openssl/rand.h>
-#include <sys/stat.h>
+#include <openssl/sha.h>
 #include <unistd.h>
 #include <cstdlib>
 #include <string.h>
@@ -16,7 +17,7 @@
 #include <sstream>
 #include <fstream>
 #include <iomanip>
-#include <openssl/sha.h>
+#include <sys/stat.h>
 #include <sys/types.h>
 #include <jsoncpp/json/json.h>
 
@@ -97,24 +98,11 @@ bool check_invalid_username(string username) {
     return true;
 }
 
-void command_pwd(vector<string>& dir)
-{
-    if (dir.empty()) {
-        cout << "/";
-    }
-    else {
-        for (string str:dir) {
-            cout << "/" << str;
-        }
-    }
-    cout << endl;
-    return;
-}
 
 void command_mkfile(const std::string& username, const std::string& filename, const std::string& curr_dir, const std::string& contents)
 {
     string hashed_filename = auth::hash(filename);
-    auth::write_to_metadata(hashed_filename, filename);
+    metadata::write(hashed_filename, filename);
     std::string full_path = "filesystem/" + auth::hash(username) + "/" + curr_dir + hashed_filename;
 
     char *message = new char[contents.length() + 1];
@@ -296,63 +284,6 @@ std::string command_cat_admin(const std::string& username, const std::string& fi
     return decrypt;
 }
 
-void command_cd(vector<string>& dir, string change_dir, string username) {
-    stringstream test(change_dir);
-    string segment;
-    vector<string> seglist;
-    vector<string> new_dir;
-
-    // split input by '/'
-    while(getline(test, segment, '/'))
-    {
-        seglist.push_back(segment);
-    }
-    
-    // if the input started by "." or "..", use the current directory for prefix
-    if (seglist[0] == "." || seglist[0] == ".." || !seglist[0].empty()) {
-        new_dir = dir;
-    }
-    
-    // build new directory
-    for (string seg : seglist) {
-        if (seg == "." || seg.empty()) {
-            continue;
-        }
-        else if (seg == "..") {
-            if (new_dir.empty()) {
-                cout << "Invalid directory!" << endl;
-                return;
-            }
-            new_dir.pop_back();
-        }
-        else {
-            new_dir.push_back(seg);
-        }
-    }
-
-    // convert new directory to string in order to use std::filesystem functions
-    string check_dir = std::filesystem::current_path().string() + "/" + "filesystem";
-    if (username != "Admin") {
-        check_dir = check_dir + "/" + auth::hash(username);
-    }
-    for (string str : new_dir) {
-        if (!str.empty()) {
-            check_dir = check_dir + "/" + auth::hash(str);
-        }
-    }
-    // cout << "TEST: " << check_dir << endl;
-    if (std::filesystem::is_directory(std::filesystem::status(check_dir)) ) {
-        dir = new_dir;
-        cout << "Change directory to: ";
-        command_pwd(dir); 
-    }
-    else {
-        cout << "Invalid directory!" << endl;
-    }
-
-    return;
-}
-
 bool is_admin(string username) {
     if (strcasecmp(username.c_str(), "admin") == 0) {
         return true;
@@ -491,44 +422,6 @@ void command_sharefile(string username, string key_name, vector<string>& dir, st
     cout << "File '" << filename << "' has been successfully shared with user '" << target_username << "'" << endl;
 }
 
-void command_mkdir(vector<string>& dir, string new_dir, string username) {
-    string cur_dir;
-    for (string str:dir) {
-        cur_dir = cur_dir + '/' + auth::hash(str);
-    }
-
-    if (new_dir.find(".") != -1 or new_dir.find("..") != -1 or new_dir.find("/") != -1){
-        cout << "Invalid directory name." << endl;
-        return;
-    }
-
-    if(username != "Admin"){
-        if (!dir.empty()){
-            if (cur_dir.substr(1,65) == auth::hash("shared"))
-            {
-                cout << "Forbidden: Cannot create directory in /shared" << endl;
-            }
-            else{
-                auth::write_to_metadata(auth::hash(new_dir),new_dir);
-                new_dir = std::filesystem::current_path().string() + "/filesystem/" + auth::hash(username) + '/' + cur_dir.substr(1) + '/' + auth::hash(new_dir);
-
-                char* dirname = strdup(new_dir.c_str());
-                if (mkdir(dirname, 0777) == -1)
-                    cerr << "Error: directory exists."<< endl;
-                else
-                    cout << "Directory created" << endl;
-                free(dirname);
-            }           
-        }
-        else{
-            cout << "Forbidden" << endl;
-        }
-    }
-    else{
-        cout << "Invalid command for admin!" << endl;
-    }
-}
-
 bool isWhitespace(std::string s){
     for(int index = 0; index < s.length(); index++){
         if(!std::isspace(s[index]))
@@ -562,10 +455,10 @@ int main(int argc, char** argv) {
 
         //Generate random salt value using cryptographically secure random function
         string random_salt = auth::csprng();
-        auth::write_to_metadata("salt", random_salt);
+        metadata::write("salt", random_salt);
 
-        auth::write_to_metadata(auth::hash("personal"), "personal");
-        auth::write_to_metadata(auth::hash("shared"), "shared");
+        metadata::write(auth::hash("personal"), "personal");
+        metadata::write(auth::hash("shared"), "shared");
 
         initial_adminkey_setup();
 
@@ -588,7 +481,7 @@ int main(int argc, char** argv) {
             size_t pos = key_name.find("_");
             username = key_name.substr(0,pos);
             cout << "Welcome! Logged in as " << username << endl;
-            command::show_help(is_admin(username));
+            command::help(is_admin(username));
         }
     }
 
@@ -611,13 +504,13 @@ int main(int argc, char** argv) {
         // 1. pwd 
         //
         else if (user_command == "pwd") {
-            command_pwd(dir);
+            std::cout << command::pwd(dir) << std::endl;
         }
 
         // 2. cd  
         //
         else if (user_command.substr(0, 2) == "cd" && user_command.substr(2, 1) == " ") {
-            command_cd(dir, user_command.substr(3), username);
+            command::cd(dir, user_command.substr(3), username);
         }
         // 3. ls  
         //
@@ -628,7 +521,7 @@ int main(int argc, char** argv) {
         // 4. mkdir  
         //
         else if (user_command.substr(0,5) == "mkdir" && user_command.substr(5,1) == " " && !isWhitespace(user_command.substr(6)) ) {
-            command_mkdir(dir, user_command.substr(6), username);
+            command::makedir(dir, user_command.substr(6), username);
         }
 
         /* File commands section*/

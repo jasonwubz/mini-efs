@@ -1,5 +1,6 @@
 
 #include <auth.h>
+#include <metadata.h>
 #include <cstdlib>
 #include <openssl/rsa.h>
 #include <openssl/pem.h>
@@ -42,32 +43,15 @@ int auth::public_encrypt(int flen, unsigned char* from, unsigned char* to, RSA* 
 }
 
 // This function implement RSA private key decryption
-int auth::private_decrypt(int flen, unsigned char* from, unsigned char* to, RSA* key, int padding) {
+int auth::private_decrypt(int flen, unsigned char* from, unsigned char* to, RSA* key, int padding)
+{
     int result = RSA_private_decrypt(flen, from, to, key, padding);
     return result;
 }
 
-// In mkfile and mkdir, we need to calculate the key: value pair and store it in metadata.json
-void auth::write_to_metadata(std::string sha, std::string name) {
-    std::ifstream ifs("metadata.json");
-    Json::Value metadata;
-    Json::CharReaderBuilder builder;
-    JSONCPP_STRING err;
-    Json::parseFromStream(builder, ifs, &metadata, &err);
-    
-    // Add a new key-value pair to the Json::Value object
-    metadata[sha] = name;
-
-    // Write the modified Json::Value object back to the JSON file
-    std::ofstream ofs("metadata.json");
-    Json::StreamWriterBuilder writerBuilder;
-    std::unique_ptr<Json::StreamWriter> writer(writerBuilder.newStreamWriter());
-    writer->write(metadata, &ofs);
-}
-
 // This function will read RSA (public or private) keys specified by key_path
-RSA * auth::read_RSAkey(std::string key_type, std::string key_path){
-    
+RSA * auth::read_RSAkey(std::string key_type, std::string key_path)
+{
     FILE  *fp  = NULL;
     RSA   *rsa = NULL;
 
@@ -187,7 +171,7 @@ int auth::user_folder_setup(std::string new_username){
 
     if (status1 == 0 && status2 == 0 && status3 == 0) {
         std::cout << "User " << new_username << " folders created successfully" << std::endl << std::endl;
-        write_to_metadata(auth::hash(new_username),new_username);
+        metadata::write(auth::hash(new_username),new_username);
         return 0;
     } else {
         std::cerr << "Failed to create user folders. Please check permission and try again " << std::endl;
@@ -211,8 +195,8 @@ void auth::create_RSA(std::string key_name) {
         std::string publickey_path = "./publickeys/" + publickey_name_sha;
         std::string privatekey_path = privatekey_name_sha;
 
-        write_to_metadata(publickey_name_sha, publickey_name);
-        write_to_metadata(privatekey_name_sha, privatekey_name);
+        metadata::write(publickey_name_sha, publickey_name);
+        metadata::write(privatekey_name_sha, privatekey_name);
         
         RSA   *rsa = NULL;
         FILE  *fp  = NULL;
@@ -244,8 +228,8 @@ void auth::create_RSA(std::string key_name) {
         std::string publickey_name_sha = auth::hash(publickey_name);
         std::string privatekey_name_sha = auth::hash(privatekey_name);
 
-        write_to_metadata(publickey_name_sha, publickey_name);
-        write_to_metadata(privatekey_name_sha, privatekey_name);
+        metadata::write(publickey_name_sha, publickey_name);
+        metadata::write(privatekey_name_sha, privatekey_name);
 
         std::string publickey_path = "./publickeys/" + auth::hash(publickey_name);
         std::string privatekey_path = "filesystem/" + auth::hash(username) + "/" + auth::hash(privatekey_name);
