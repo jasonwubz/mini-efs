@@ -16,8 +16,6 @@
 #include <sys/types.h>
 #include <jsoncpp/json/json.h>
 
-#define DIR_PERMISSION 0744
-
 std::vector<std::string> split_string(const std::string& ipstr, const std::string& delimiter)
 {
     size_t pos;
@@ -111,31 +109,33 @@ int main(int argc, char** argv)
             std::string username = key_name.substr(0,pos);
             currentUser.set_user(username);
             std::cout << "Welcome! Logged in as " << username << std::endl;
-            command::help(currentUser.isAdmin);
+            command::help(currentUser);
         }
     }
 
     std::vector<std::string> dir;
-    
+
     while (true) {
         std::cout << std::endl;
         std::cout << "> ";
         getline(std::cin, user_command);
         std::vector<std::string> splits = split_string(user_command, " ");
 
-        if (user_command == "exit") {
+        if (user_command == "help") {
+            command::help(currentUser);
+        } else if (user_command == "exit") {
             std::cout << "Fileserver closed. Goodbye " << currentUser.username << " :)" << std::endl;
             return 0;
         } else if (user_command == "pwd") {
-            std::cout << command::pwd(dir) << std::endl;
+            std::cout << command::pwd(currentUser, dir) << std::endl;
         } else if (user_command.substr(0, 2) == "cd" && user_command.substr(2, 1) == " ") {
-            command::cd(dir, user_command.substr(3), currentUser.username);
+            command::cd(currentUser, dir, user_command.substr(3), currentUser.username);
         } else if (user_command == "ls") {
-            command::ls(dir, currentUser.username);
+            command::ls(currentUser, dir);
         } else if (user_command.substr(0,5) == "mkdir" && user_command.substr(5,1) == " " && !isWhitespace(user_command.substr(6)) ) {
-            command::makedir(dir, user_command.substr(6), currentUser.username);
+            command::makedir(currentUser, dir, user_command.substr(6), currentUser.username);
         } else if (user_command.rfind("share", 0) == 0) {
-            command::sharefile(currentUser.username, key_name, dir, user_command);
+            command::sharefile(currentUser, currentUser.username, key_name, dir, user_command);
         } else if (splits[0] == "cat") {
             if (splits.size() < 2) {
                 std::cout << "Please provide filename" << std::endl;
@@ -165,7 +165,7 @@ int main(int argc, char** argv)
             if (currentUser.isAdmin) {
                 catUsername = dir[0];
             }
-            std::string contents = command::cat(catUsername, splits[1], curr_dir_hashed, key_name);
+            std::string contents = command::cat(currentUser, catUsername, splits[1], curr_dir_hashed, key_name);
             std::cout << contents << std::endl;
         } else if (splits[0] == "mkfile") {
             if (splits.size() < 3 || splits[2].empty()) {
@@ -180,11 +180,6 @@ int main(int argc, char** argv)
                 curr_dir_hashed.append(auth::hash(str));
                 curr_dir.append("/");
                 curr_dir_hashed.append("/");
-            }
-
-            if (currentUser.isAdmin) {
-                std::cout << "Sorry, admin cannot create files" << std::endl;
-                continue;
             }
 
             if (curr_dir.empty() || curr_dir.rfind("shared", 0) == 0) {
@@ -205,7 +200,7 @@ int main(int argc, char** argv)
                 continue;
             }
 
-            command::mkfile(currentUser.username, splits[1], curr_dir_hashed, file_contents);
+            command::mkfile(currentUser, currentUser.username, splits[1], curr_dir_hashed, file_contents);
         } else if (user_command.rfind("adduser", 0) == 0) {
             if (!currentUser.isAdmin) {
                 std::cout << "Forbidden. Only Admin can perform adduser command." << std::endl;
@@ -242,7 +237,7 @@ int main(int argc, char** argv)
                 continue;
             }
             //passed all exception checks, now we create new user
-            command::adduser(new_username);
+            command::adduser(currentUser, new_username);
         } else {
             std::cout << "Invalid command." << std::endl;
         }

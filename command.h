@@ -1,6 +1,7 @@
 #ifndef MINIIEFS_CMD
 #define MINIIEFS_CMD
 
+#include <auth.h>
 #include <cstdlib>
 #include <openssl/rsa.h>
 #include <string>
@@ -9,15 +10,15 @@
 
 namespace command
 {
-    void help(bool is_admin);
-    void ls(std::vector<std::string>&dir, std::string username);
-    void adduser(std::string new_username);
-    std::string pwd(std::vector<std::string>& dir);
-    void cd(std::vector<std::string>& dir, std::string change_dir, std::string username);
-    void makedir(std::vector<std::string>& dir, std::string new_dir, std::string username);
-    void mkfile(const std::string& username, const std::string& filename, const std::string& curr_dir, const std::string& contents);
-    void sharefile(std::string username, std::string key_name, std::vector<std::string>& dir, std::string user_command);
-    std::string cat(const std::string& username, const std::string& filename, const std::string& curr_dir, const std::string& key_name);
+    void help(auth::User &currentUser);
+    void ls(auth::User &currentUser, std::vector<std::string> &dir);
+    void adduser(auth::User &currentUser, std::string new_username);
+    std::string pwd(auth::User &currentUser, std::vector<std::string> &dir);
+    void cd(auth::User &currentUser, std::vector<std::string> &dir, std::string change_dir, std::string username);
+    void makedir(auth::User &currentUser, std::vector<std::string> &dir, std::string new_dir, std::string username);
+    void mkfile(auth::User &currentUser, const std::string &username, const std::string &filename, const std::string &curr_dir, const std::string &contents);
+    void sharefile(auth::User &currentUser, std::string username, std::string key_name, std::vector<std::string> &dir, std::string user_command);
+    std::string cat(auth::User &currentUser, const std::string &username, const std::string &filename, const std::string &curr_dir, const std::string &key_name);
 }
 
 #endif

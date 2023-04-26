@@ -16,8 +16,7 @@
 #include <sys/stat.h>
 #include <jsoncpp/json/json.h>
 
-#define DIR_PERMISSION 0744
-
+// Initialize user values
 void auth::User::set_user(std::string u)
 {
     username = u;
@@ -25,6 +24,36 @@ void auth::User::set_user(std::string u)
     if (strcasecmp(username.c_str(), "admin") == 0) {
         isAdmin = true;
     }
+}
+
+// Get user's RSA (public or private)
+RSA *auth::User::get_key(int type)
+{
+    std::string path;
+
+    if (type == AUTH_KEY_TYPE_PUBLIC) {
+        path = "./publickeys/" + auth::hash(username + "_publickey");
+    } else if (type == AUTH_KEY_TYPE_PRIVATE) {
+        path = "./privatekeys/" + auth::hash(username);
+    }
+
+    if (type == AUTH_KEY_TYPE_PUBLIC) {
+        if (RSA_size(publicKey) != 0) {
+            return publicKey;
+        }
+        path = "./publickeys/" + auth::hash(username + "_publickey");
+        publicKey = auth::get_key(type, path);
+        return publicKey;
+    } else if (type == AUTH_KEY_TYPE_PRIVATE) {
+        if (RSA_size(privateKey) != 0) {
+            return privateKey;
+        }
+        path = "./privatekeys/" + auth::hash(username);
+        privateKey = auth::get_key(type, path);
+        return privateKey;
+    }
+
+    return RSA_new();
 }
 
 std::string auth::csprng()
@@ -54,44 +83,42 @@ bool auth::is_admin(std::string username)
 }
 
 // This function implement RSA public key encryption
-int auth::public_encrypt(int flen, unsigned char* from, unsigned char* to, RSA* key, int padding) {
-    
-    int result = RSA_public_encrypt(flen, from, to, key, padding);
-    return result;
+int auth::public_encrypt(int flen, unsigned char *from, unsigned char *to, RSA *key, int padding)
+{
+    return RSA_public_encrypt(flen, from, to, key, padding);
 }
 
 // This function implement RSA private key decryption
-int auth::private_decrypt(int flen, unsigned char* from, unsigned char* to, RSA* key, int padding)
+int auth::private_decrypt(int flen, unsigned char *from, unsigned char *to, RSA *key, int padding)
 {
-    int result = RSA_private_decrypt(flen, from, to, key, padding);
-    return result;
+    return RSA_private_decrypt(flen, from, to, key, padding);
 }
 
-// This function will read RSA (public or private) keys specified by key_path
-RSA * auth::read_RSAkey(std::string key_type, std::string key_path)
+// Get RSA (public or private) key specified by path
+RSA *auth::get_key(int type, std::string path)
 {
-    FILE  *fp  = NULL;
-    RSA   *rsa = NULL;
+    FILE *fp  = NULL;
+    RSA *rsa = NULL;
 
-    fp = fopen(&key_path[0], "rb");
-    if (fp == NULL){
-        //invalid key_name provided
+    fp = fopen(&path[0], "rb");
+    if (fp == NULL) {
         return rsa;
     }
 
-    if (key_type == "public"){
+    if (type == AUTH_KEY_TYPE_PUBLIC) {
         PEM_read_RSAPublicKey(fp, &rsa, NULL, NULL);
-        fclose(fp);        
-    } else if (key_type == "private"){
+        fclose(fp);
+    } else if (type == AUTH_KEY_TYPE_PRIVATE) {
         PEM_read_RSAPrivateKey(fp, &rsa, NULL, NULL);
         fclose(fp);
     }
+
     return rsa;
 }
 
-void auth::create_encrypted_file(std::string filename, char* encrypted_content, RSA* key_pair)
+void auth::create_encrypted_file(std::string filename, char *encrypted_content, RSA *key_pair)
 {
-    FILE* encrypted_file = fopen(&filename[0], "wb");
+    FILE *encrypted_file = fopen(&filename[0], "wb");
     if (encrypted_file == nullptr) {
         std::cout << "Unable to create file, please check directory permissions" << std::endl;
         return;
@@ -100,34 +127,34 @@ void auth::create_encrypted_file(std::string filename, char* encrypted_content, 
     fclose(encrypted_file);
 }
 
-// Read metadata.json, use sha value as key to get back the file or directory name
-std::string auth::hash_to_val(std::string sha) {
+// Read metadata.json, use hash as key to get back original value
+std::string auth::hash_to_val(std::string hash)
+{
     std::ifstream ifs("metadata.json");
     Json::Value metadata;
     Json::CharReaderBuilder builder;
     JSONCPP_STRING err;
     Json::parseFromStream(builder, ifs, &metadata, &err);
 
-    std::string name = metadata[sha].asString();
-    return name;
+    return metadata[hash].asString();
 }
 
-// Give it a file or directory name, return the SHA-256 hash value
-std::string auth::hash(std::string name) {
-    // Append salt before calculating the sha256 hash. So attacker can no longer find the original by checking common hash value websites
+// SHA-256 hash value of given string
+std::string auth::hash(std::string value)
+{
+    // Append salt before calculating the sha256 hash. Makes dictionary attacks less effective
     std::string salt = auth::hash_to_val("salt");
-    name += salt;
+    value += salt;
     unsigned char hash[SHA256_DIGEST_LENGTH];
     SHA256_CTX sha256;
     SHA256_Init(&sha256);
-    SHA256_Update(&sha256, name.c_str(), name.size());
+    SHA256_Update(&sha256, value.c_str(), value.size());
     SHA256_Final(hash, &sha256);
-    std::stringstream ss;
-    for(int i = 0; i < SHA256_DIGEST_LENGTH; i++)
-    {
-        ss << std::hex << std::setw(2) << std::setfill('0') << (int) hash[i];
+    std::stringstream hashStream;
+    for (int i = 0; i < SHA256_DIGEST_LENGTH; i++) {
+        hashStream << std::hex << std::setw(2) << std::setfill('0') << (int) hash[i];
     }
-    return ss.str();
+    return hashStream.str();
 }
 
 int auth::login_authentication(std::string key_name){
@@ -142,14 +169,14 @@ int auth::login_authentication(std::string key_name){
     std::string privatekey_name = key_name + "_privatekey";
     
     public_key_path = "./publickeys/" + auth::hash(publickey_name);
-    public_key = auth::read_RSAkey("public", public_key_path);    
+    public_key = auth::get_key(AUTH_KEY_TYPE_PUBLIC, public_key_path);    
 
     if (auth::is_admin(username)) {
         private_key_path = auth::hash(privatekey_name);
     } else {
         private_key_path = "./filesystem/" + auth::hash(username) + "/" + auth::hash(privatekey_name);
     }
-    private_key = read_RSAkey("private", private_key_path);
+    private_key = auth::get_key(AUTH_KEY_TYPE_PRIVATE, private_key_path);
     
     if (public_key == NULL || private_key == NULL){
         //not such key by searching the provided key_name
@@ -165,8 +192,8 @@ int auth::login_authentication(std::string key_name){
         char *decrypt = NULL;
 
         // Do RSA encryption using public key
-        encrypt = (char*)malloc(RSA_size(public_key));
-        int encrypt_length = public_encrypt(strlen(message) + 1, (unsigned char*)message, (unsigned char*)encrypt, public_key, RSA_PKCS1_OAEP_PADDING);
+        encrypt = (char *)malloc(RSA_size(public_key));
+        int encrypt_length = public_encrypt(strlen(message) + 1, (unsigned char *)message, (unsigned char *)encrypt, public_key);
         if(encrypt_length == -1) {
             // cout << "An error occurred in public_encrypt() method" << endl;
             return 1;
@@ -174,7 +201,7 @@ int auth::login_authentication(std::string key_name){
         
         // Try to do RSA decryption using corresponding private key
         decrypt = (char *)malloc(encrypt_length);
-        int decrypt_length = private_decrypt(encrypt_length, (unsigned char*)encrypt, (unsigned char*)decrypt, private_key, RSA_PKCS1_OAEP_PADDING);
+        int decrypt_length = private_decrypt(encrypt_length, (unsigned char *)encrypt, (unsigned char *)decrypt, private_key);
         if(decrypt_length == -1) {
             // cout << "An error occurred in private_decrypt() method" << endl;
             return 1;
@@ -226,9 +253,9 @@ void auth::create_RSA(std::string key_name) {
         metadata::write(publickey_name_sha, publickey_name);
         metadata::write(privatekey_name_sha, privatekey_name);
         
-        RSA   *rsa = NULL;
-        FILE  *fp  = NULL;
-        FILE  *fp1  = NULL;
+        RSA *rsa = NULL;
+        FILE *fp  = NULL;
+        FILE *fp1  = NULL;
 
         BIGNUM *bne = NULL;
         bne = BN_new();
@@ -263,10 +290,10 @@ void auth::create_RSA(std::string key_name) {
         std::string privatekey_path = "filesystem/" + auth::hash(username) + "/" + auth::hash(privatekey_name);
         std::string privatekey_foradmin_path = "./privatekeys/" + auth::hash(username) ;
         
-        RSA   *rsa = NULL;
-        FILE  *fp  = NULL;
-        FILE  *fp1  = NULL;
-        FILE  *fp2  = NULL;
+        RSA *rsa = NULL;
+        FILE *fp  = NULL;
+        FILE *fp1  = NULL;
+        FILE *fp2  = NULL;
 
         BIGNUM *bne = NULL;
         bne = BN_new();
@@ -297,9 +324,9 @@ int auth::initial_setup()
 {
     //create "filesystem", "privatekeys","publickeys" folders
     if (
-        mkdir("filesystem", DIR_PERMISSION) == 0 &&
-        mkdir("privatekeys", DIR_PERMISSION) == 0 &&
-        mkdir("publickeys", DIR_PERMISSION) == 0
+        mkdir("filesystem", AUTH_DIR_PERMISSION) == 0 &&
+        mkdir("privatekeys", AUTH_DIR_PERMISSION) == 0 &&
+        mkdir("publickeys", AUTH_DIR_PERMISSION) == 0
     ){
         std::cout << "Filesystem created successfully" << std::endl << std::endl;
     } else {
