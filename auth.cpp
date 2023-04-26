@@ -18,7 +18,17 @@
 
 #define DIR_PERMISSION 0744
 
-std::string auth::csprng() {
+void auth::User::set_user(std::string u)
+{
+    username = u;
+    isAdmin = false;
+    if (strcasecmp(username.c_str(), "admin") == 0) {
+        isAdmin = true;
+    }
+}
+
+std::string auth::csprng()
+{
     constexpr size_t rsize = 32;
     unsigned char ran_buf[rsize];
     std::ostringstream result_stream;
@@ -190,7 +200,7 @@ int auth::user_folder_setup(std::string new_username){
 
     if (status1 == 0 && status2 == 0 && status3 == 0) {
         std::cout << "User " << new_username << " folders created successfully" << std::endl << std::endl;
-        metadata::write(auth::hash(new_username),new_username);
+        metadata::write(auth::hash(new_username), new_username);
         return 0;
     } else {
         std::cerr << "Failed to create user folders. Please check permission and try again " << std::endl;
@@ -307,14 +317,10 @@ int auth::initial_setup()
 
     //Generate random salt value using cryptographically secure random function
     std::string random_salt = auth::csprng();
-    
-    // metadata::write("salt", random_salt);
-    // metadata::write(auth::hash("personal"), "personal");
-    // metadata::write(auth::hash("shared"), "shared");
 
     metadata["salt"] = random_salt;
-    metadata[auth::hash("personal")] = "personal";
-    metadata[auth::hash("shared")] = "shared";
+    // metadata[auth::hash("personal")] = "personal";
+    // metadata[auth::hash("shared")] = "shared";
 
     if (writer->write(metadata, &ofs) != 0) {
         std::cerr << "Failed to create filesystem. Please check permission and try again " << std::endl;

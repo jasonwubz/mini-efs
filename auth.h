@@ -8,6 +8,13 @@
 
 namespace auth
 {
+    struct User{
+        bool isAdmin;
+        std::string username;
+        void set_user(std::string username);
+    };
+    bool is_admin(std::string username);
+
     std::string csprng();
     RSA * read_RSAkey(std::string key_type, std::string key_path);
     void create_RSA(std::string key_name);
@@ -16,7 +23,6 @@ namespace auth
     int private_decrypt(int flen, unsigned char* from, unsigned char* to, RSA* key, int padding);
     int login_authentication(std::string key_name);
     int initial_setup();
-    bool is_admin(std::string username);
     int user_folder_setup(std::string new_username);
     std::string hash_to_val(std::string sha);
     std::string hash(std::string name);
