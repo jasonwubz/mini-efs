@@ -21,44 +21,7 @@
 #include <sys/types.h>
 #include <jsoncpp/json/json.h>
 
-int initial_folder_setup(){
-    //create "filesystem", "privatekeys","publickeys" folders
-    int status1 = mkdir("filesystem", 0744);
-    int status2 = mkdir("privatekeys", 0744);
-    int status3 = mkdir("publickeys", 0744);
-
-    if (status1 == 0 && status2 == 0 && status3 == 0){
-        std::cout << "Filesystem created successfully" << std::endl << std::endl;
-    } else {
-        std::cerr << "Failed to create filesystem. Please check permission and try again " << std::endl;
-        return 1;
-    }
-
-    // Create an empty json file metadata.json
-    Json::Value metadata;
-    std::ofstream ofs("./metadata.json");
-    Json::StreamWriterBuilder writerBuilder;
-    std::unique_ptr<Json::StreamWriter> writer(writerBuilder.newStreamWriter());
-    writer->write(metadata, &ofs);
-
-    return 0;
-}
-
-void initial_adminkey_setup()
-{
-    std::string username = "Admin";
-    std::string random_byte_hex = auth::csprng();
-    if (random_byte_hex.length() == 0) {
-        return;
-    }
-    std::string key_name = username + "_" + random_byte_hex;
-
-    auth::create_RSA(key_name);
-    std::cout << "Admin Public/Private key pair has been created." << std::endl;
-    std::cout << "Your private key_name is " << key_name << std::endl;
-    std::cout << "Please store your key_name safely. Admin can login by command: " << std::endl;
-    std::cout << "./fileserver " << key_name << std::endl << std::endl;
-}
+#define DIR_PERMISSION 0744
 
 std::vector<std::string> split_string(const std::string& ipstr, const std::string& delimiter)
 {
@@ -75,81 +38,31 @@ std::vector<std::string> split_string(const std::string& ipstr, const std::strin
     return splits;
 }
 
-bool check_invalid_username(std::string username) {
-    for(int i=0;i<username.length();i++){
-        if(!std::isalpha(username[i]) && !std::isdigit(username[i])) {return false;}
+bool check_invalid_username(std::string username)
+{
+    for (int i=0;i<username.length();i++) {
+        if (!std::isalpha(username[i]) && !std::isdigit(username[i])) {
+            return false;
+        }
     }
     return true;
 }
 
 std::string command_cat(const std::string& username, const std::string& filename, const std::string& curr_dir, const std::string& key_name)
 {
+    bool isAdmin = auth::is_admin(username);
     std::string hashed_filename = auth::hash(filename);
-    std::string full_path = "filesystem/" + auth::hash(username) + "/" + curr_dir + hashed_filename;
+    std::string full_path;
+    
+    if (isAdmin) {
+        full_path = "filesystem/" + curr_dir + hashed_filename;
+    } else {
+        full_path = "filesystem/" + auth::hash(username) + "/" + curr_dir + hashed_filename;
+    }
 
     struct stat s;
     if (stat(full_path.c_str(), &s) == 0) {
         if (s.st_mode & S_IFDIR) {
-            std::cout << "Cannot open a directory, please enter a file name" << std::endl;
-            return "";
-        }
-    }
-
-    std::ifstream infile(full_path);
-
-    if (!(infile && infile.is_open())) {
-        std::cout << "Unable to open the file, please check file name" << std::endl;
-        return "";
-    }
-
-    infile.seekg(0, std::ios::end);
-    size_t length = infile.tellg();
-    infile.seekg(0, std::ios::beg);
-
-    std::string public_key_path = "./publickeys/" + auth::hash(username + "_publickey");
-    RSA *public_key = auth::read_RSAkey("public", public_key_path);
-
-    if (public_key == NULL) {
-        std::cout << "Error! Public key not found or invalid" << std::endl;
-        return "";
-    }
-
-    char *contentss = (char*)malloc(RSA_size(public_key));;
-    infile.read(contentss, length);
-    infile.close();
-
-    char *decrypt;
-
-    std::string private_key_path;
-    RSA *private_key;
-    private_key_path = "./filesystem/" + auth::hash(username) + "/" + auth::hash(key_name + "_privatekey");
-    private_key = auth::read_RSAkey("private", private_key_path);
-
-    decrypt = (char*)malloc(RSA_size(public_key));
-
-    if (private_key == NULL) {
-        std::cout << "Error! Private key not found or invalid" << std::endl;
-        return "";
-    }
-
-    int decrypt_length = auth::private_decrypt(RSA_size(private_key), (unsigned char*)contentss, (unsigned char*)decrypt, private_key, RSA_PKCS1_OAEP_PADDING);
-    if (decrypt_length == -1) {
-        std::cout << "An error occurred in private_decrypt() method" << std::endl;
-    }
-
-    std::string output = decrypt;
-    free(decrypt);
-    return output;
-}
-
-std::string command_cat_admin(const std::string& username, const std::string& filename, const std::string& curr_dir, const std::string& key_name)
-{
-    std::string hashed_filename = auth::hash(filename);
-    std::string full_path = "filesystem/" + curr_dir + hashed_filename;
-
-    struct stat s;
-    if (stat(full_path.c_str(), &s) == 0 ) {
-        if (s.st_mode & S_IFDIR){
             std::cout << "Cannot open a directory, please enter a file name" << std::endl;
             return "";
         }
@@ -182,8 +95,11 @@ std::string command_cat_admin(const std::string& username, const std::string& fi
 
     std::string private_key_path;
     RSA *private_key;
-    private_key_path = "./privatekeys/" + auth::hash(username);
-
+    if (isAdmin) {
+        private_key_path = "./privatekeys/" + auth::hash(username);
+    } else {
+        private_key_path = "./filesystem/" + auth::hash(username) + "/" + auth::hash(key_name + "_privatekey");
+    }
     private_key = auth::read_RSAkey("private", private_key_path);
 
     decrypt = (char*)malloc(RSA_size(public_key));
@@ -198,21 +114,15 @@ std::string command_cat_admin(const std::string& username, const std::string& fi
         std::cout << "An error occurred in private_decrypt() method" << std::endl;
     }
 
-    return decrypt;
-}
-
-bool is_admin(std::string username)
-{
-    if (strcasecmp(username.c_str(), "admin") == 0) {
-        return true;
-    }
-    return false;
+    std::string output = decrypt;
+    free(decrypt);
+    return output;
 }
 
 void command_sharefile(std::string username, std::string key_name, std::vector<std::string>& dir, std::string user_command)
 {
     // check who is the username
-    if (is_admin(username) == true) {
+    if (auth::is_admin(username) == true) {
         std::cout << "Forbidden" << std::endl;
         return;
     }
@@ -326,7 +236,7 @@ void command_sharefile(std::string username, std::string key_name, std::vector<s
     std::string target_share_directory = "./filesystem/" + hashed_target_username + "/" + auth::hash("shared") +"/" + hashed_username;
     // cout << "Target directory:" << target_share_directory << endl;
     if (!std::filesystem::is_directory(std::filesystem::status(target_share_directory))) {
-        int dir_create_status = mkdir(&target_share_directory[0], 0744);
+        int dir_create_status = mkdir(&target_share_directory[0], DIR_PERMISSION);
         if (dir_create_status != 0) {
             std::cout << "An error occurred during file share" << std::endl;
             return;
@@ -367,19 +277,22 @@ int main(int argc, char** argv)
         //Initial Setup
         std::cout << "No file system exists yet. Execute Initial setup..." << std::endl << std::endl;
 
-        int folder_result = initial_folder_setup();
-        if (folder_result == 1) {
+        if (auth::initial_setup() == 1) {
             return 1;
         }
 
-        //Generate random salt value using cryptographically secure random function
-        std::string random_salt = auth::csprng();
-        metadata::write("salt", random_salt);
+        std::string username = "admin";
+        std::string randomKey = auth::csprng();
+        if (randomKey.length() == 0) {
+            return 1;
+        }
+        std::string key_name = username + "_" + randomKey;
 
-        metadata::write(auth::hash("personal"), "personal");
-        metadata::write(auth::hash("shared"), "shared");
-
-        initial_adminkey_setup();
+        auth::create_RSA(key_name);
+        std::cout << "Admin Public/Private key pair has been created." << std::endl;
+        std::cout << "Your private key_name is " << key_name << std::endl;
+        std::cout << "Please store your key_name safely. Admin can login by command: " << std::endl;
+        std::cout << "./fileserver " << key_name << std::endl << std::endl;
 
         std::cout << "Initial setup finshed, Fileserver closed. Admin now can login using the admin keyfile" << std::endl;
         return 0;
@@ -399,7 +312,7 @@ int main(int argc, char** argv)
             size_t pos = key_name.find("_");
             username = key_name.substr(0,pos);
             std::cout << "Welcome! Logged in as " << username << std::endl;
-            command::help(is_admin(username));
+            command::help(auth::is_admin(username));
         }
     }
 
@@ -450,14 +363,15 @@ int main(int argc, char** argv)
                 std::cout << "Forbidden" << std::endl;
                 continue;
             }
-
-            if (is_admin(username)) {
-                std::string contents = command_cat_admin(dir[0], splits[1], curr_dir_hashed, key_name);
-                std::cout << contents << std::endl;
-            } else {
-                std::string contents = command_cat(username, splits[1], curr_dir_hashed, key_name);
+            
+            std::string catUsername = username;
+            if (auth::is_admin(username)) {
+                catUsername = dir[0];
+                std::string contents = command_cat(dir[0], splits[1], curr_dir_hashed, key_name);
                 std::cout << contents << std::endl;
             }
+            std::string contents = command_cat(username, splits[1], curr_dir_hashed, key_name);
+            std::cout << contents << std::endl;
         } else if (splits[0] == "mkfile") {
             if (splits.size() < 3 || splits[2].empty()) {
                 std::cout << "Filename and file contents cannot be empty" << std::endl;
@@ -473,7 +387,7 @@ int main(int argc, char** argv)
                 curr_dir_hashed.append("/");
             }
 
-            if (is_admin(username)) {
+            if (auth::is_admin(username)) {
                 std::cout << "Sorry, admin cannot create files" << std::endl;
                 continue;
             }
@@ -498,7 +412,7 @@ int main(int argc, char** argv)
 
             command::mkfile(username, splits[1], curr_dir_hashed, file_contents);
         } else if (user_command.rfind("adduser", 0) == 0) {
-            if (!is_admin(username)) {
+            if (!auth::is_admin(username)) {
                 std::cout << "Forbidden. Only Admin can perform adduser command." << std::endl;
                 continue; 
             }

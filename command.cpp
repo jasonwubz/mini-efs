@@ -14,25 +14,27 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 
-void command::adduser(std::string new_username)
+#define DIR_PERMISSION 0744
+
+void command::adduser(std::string username)
 {
     // create user folders
-    int result = auth::user_folder_setup(new_username);
+    int result = auth::user_folder_setup(username);
     if (result) {
         return;
     }
 
-    // create users RSA public key and private keys (2 copies)
-    std::string random_byte_hex = auth::csprng();
-    if (random_byte_hex.length() == 0) {
+    std::string randomKey = auth::csprng();
+    if (randomKey.length() == 0) {
         return;
     }
-    std::string key_name = new_username + "_" + random_byte_hex;
+    std::string key_name = username + "_" + randomKey;
+    
     auth::create_RSA(key_name);
-    std::cout << "User " << new_username << " Public/Private key pair has been created." << std::endl;
+    std::cout << "User " << username << " Public/Private key pair has been created." << std::endl;
     std::cout << "The private key_name is " << key_name << std::endl;
     std::cout << "Please give this key_name to user and let user know that it must be remained secret to him/herself only." << std::endl;
-    std::cout << "User " << new_username << " can login by command: " << std::endl;
+    std::cout << "User " << username << " can login by command: " << std::endl;
     std::cout << "./fileserver " << key_name << std::endl << std::endl;
 }
 
@@ -43,7 +45,7 @@ void command::ls(std::vector<std::string>&dir, std::string username)
     bool upper_dir = false;
     std::cout << "d -> ."<< std::endl;
     
-    if (username == "Admin") {
+    if (auth::is_admin(username)) {
         cur_dir = std::filesystem::current_path().string() + "/filesystem/";
     } else{
         cur_dir = std::filesystem::current_path().string() + "/filesystem/" + auth::hash(username);
@@ -81,7 +83,7 @@ void command::ls(std::vector<std::string>&dir, std::string username)
     }
 }
 
-void command::help(bool is_admin)
+void command::help(bool isAdmin)
 {
     std::cout << std::endl;
     std::cout << "Available commands:" << std::endl;
@@ -93,7 +95,7 @@ void command::help(bool is_admin)
     std::cout << "cat <filename>               - Print content of the given filename" << std::endl;
     
 
-    if (is_admin) {
+    if (isAdmin) {
         std::cout << "adduser <username>           - Add new user by given username" << std::endl;
     } else {
         std::cout << "share <filename> <username>  - Share the file <filename> with the target user <username>" << std::endl;
@@ -150,7 +152,7 @@ void command::cd(std::vector<std::string>& dir, std::string change_dir, std::str
 
     // convert new directory to string in order to use std::filesystem functions
     std::string check_dir = std::filesystem::current_path().string() + "/" + "filesystem";
-    if (username != "Admin") {
+    if (!auth::is_admin(username)) {
         check_dir = check_dir + "/" + auth::hash(username);
     }
     for (std::string str : new_dir) {
@@ -190,7 +192,7 @@ void command::makedir(std::vector<std::string>& dir, std::string new_dir, std::s
                 new_dir = std::filesystem::current_path().string() + "/filesystem/" + auth::hash(username) + '/' + cur_dir.substr(1) + '/' + auth::hash(new_dir);
 
                 char* dirname = strdup(new_dir.c_str());
-                if (mkdir(dirname, 0744) == -1) {
+                if (mkdir(dirname, DIR_PERMISSION) == -1) {
                     std::cerr << "Error: directory exists."<< std::endl;
                 } else {
                     std::cout << "Directory created" << std::endl;
@@ -217,7 +219,7 @@ void command::mkfile(const std::string& username, const std::string& filename, c
     char* encrypt;
 
     std::string public_key_path = "./publickeys/" + auth::hash(username + "_publickey");
-    RSA *public_key = auth::read_RSAkey("public", public_key_path);
+    RSA* public_key = auth::read_RSAkey("public", public_key_path);
 
     if (public_key == NULL) {
         std::cout << "Error! Public key not found or invalid" << std::endl;

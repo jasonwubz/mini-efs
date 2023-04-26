@@ -15,7 +15,8 @@ namespace auth
     int public_encrypt(int flen, unsigned char* from, unsigned char* to, RSA* key, int padding);
     int private_decrypt(int flen, unsigned char* from, unsigned char* to, RSA* key, int padding);
     int login_authentication(std::string key_name);
-    //void initial_adminkey_setup();
+    int initial_setup();
+    bool is_admin(std::string username);
     int user_folder_setup(std::string new_username);
     std::string hash_to_val(std::string sha);
     std::string hash(std::string name);

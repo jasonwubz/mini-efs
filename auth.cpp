@@ -16,7 +16,7 @@
 #include <sys/stat.h>
 #include <jsoncpp/json/json.h>
 
-using namespace auth;
+#define DIR_PERMISSION 0744
 
 std::string auth::csprng() {
     constexpr size_t rsize = 32;
@@ -33,6 +33,14 @@ std::string auth::csprng() {
     }
 
     return result_stream.str();
+}
+
+bool auth::is_admin(std::string username)
+{
+    if (strcasecmp(username.c_str(), "admin") == 0) {
+        return true;
+    }
+    return false;
 }
 
 // This function implement RSA public key encryption
@@ -126,7 +134,7 @@ int auth::login_authentication(std::string key_name){
     public_key_path = "./publickeys/" + auth::hash(publickey_name);
     public_key = auth::read_RSAkey("public", public_key_path);    
 
-    if (username == "Admin"){
+    if (auth::is_admin(username)) {
         private_key_path = auth::hash(privatekey_name);
     } else {
         private_key_path = "./filesystem/" + auth::hash(username) + "/" + auth::hash(privatekey_name);
@@ -196,8 +204,7 @@ void auth::create_RSA(std::string key_name) {
     size_t pos = key_name.find("_");
     std::string username = key_name.substr(0,pos);
 
-    if (username == "Admin") {
-
+    if (username == "admin") {
         std::string publickey_name = username + "_publickey";
         std::string privatekey_name = key_name + "_privatekey";
         std::string publickey_name_sha = auth::hash(publickey_name);
@@ -276,3 +283,43 @@ void auth::create_RSA(std::string key_name) {
     }
 }
 
+int auth::initial_setup()
+{
+    //create "filesystem", "privatekeys","publickeys" folders
+    if (
+        mkdir("filesystem", DIR_PERMISSION) == 0 &&
+        mkdir("privatekeys", DIR_PERMISSION) == 0 &&
+        mkdir("publickeys", DIR_PERMISSION) == 0
+    ){
+        std::cout << "Filesystem created successfully" << std::endl << std::endl;
+    } else {
+        std::cerr << "Failed to create filesystem. Please check permission and try again " << std::endl;
+        return 1;
+    }
+
+    // Create an empty json file metadata.json
+    Json::Value metadata;
+
+    std::ofstream ofs("./metadata.json");
+    Json::StreamWriterBuilder writerBuilder;
+    std::unique_ptr<Json::StreamWriter> writer(writerBuilder.newStreamWriter());
+
+
+    //Generate random salt value using cryptographically secure random function
+    std::string random_salt = auth::csprng();
+    
+    // metadata::write("salt", random_salt);
+    // metadata::write(auth::hash("personal"), "personal");
+    // metadata::write(auth::hash("shared"), "shared");
+
+    metadata["salt"] = random_salt;
+    metadata[auth::hash("personal")] = "personal";
+    metadata[auth::hash("shared")] = "shared";
+
+    if (writer->write(metadata, &ofs) != 0) {
+        std::cerr << "Failed to create filesystem. Please check permission and try again " << std::endl;
+        return 1;
+    }
+
+    return 0;
+}
