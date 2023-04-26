@@ -84,7 +84,7 @@ int main(int argc, char** argv)
         }
         std::string key_name = username + "_" + randomKey;
 
-        auth::create_RSA(key_name);
+        auth::create_keypair(key_name);
         std::cout << "Admin Public/Private key pair has been created." << std::endl;
         std::cout << "Your private key_name is " << key_name << std::endl;
         std::cout << "Please store your key_name safely. Admin can login by command: " << std::endl;
@@ -100,7 +100,7 @@ int main(int argc, char** argv)
         // Time to do user authentication
 
         key_name = argv[1];
-        int login_result = auth::login_authentication(key_name);
+        int login_result = auth::authenticate(key_name);
         if (login_result == 1) {
             std::cout << "Invalid key_name is provided. Fileserver closed." << std::endl;
             return 1;
@@ -127,7 +127,7 @@ int main(int argc, char** argv)
             std::cout << "Fileserver closed. Goodbye " << currentUser.username << " :)" << std::endl;
             return 0;
         } else if (user_command == "pwd") {
-            std::cout << command::pwd(currentUser, dir) << std::endl;
+            std::cout << command::pwd(dir) << std::endl;
         } else if (user_command.substr(0, 2) == "cd" && user_command.substr(2, 1) == " ") {
             command::cd(currentUser, dir, user_command.substr(3), currentUser.username);
         } else if (user_command == "ls") {
@@ -200,7 +200,7 @@ int main(int argc, char** argv)
                 continue;
             }
 
-            command::mkfile(currentUser, currentUser.username, splits[1], curr_dir_hashed, file_contents);
+            command::mkfile(currentUser, splits[1], curr_dir_hashed, file_contents);
         } else if (user_command.rfind("adduser", 0) == 0) {
             if (!currentUser.isAdmin) {
                 std::cout << "Forbidden. Only Admin can perform adduser command." << std::endl;

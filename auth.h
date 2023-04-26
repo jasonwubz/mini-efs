@@ -1,5 +1,5 @@
-#ifndef MINIIEFS_AUTH
-#define MINIIEFS_AUTH
+#ifndef MINIEFS_AUTH
+#define MINIEFS_AUTH
 
 #include <cstdlib>
 #include <openssl/rsa.h>
@@ -24,14 +24,13 @@ namespace auth
 
     std::string csprng();
     RSA *get_key(int type, std::string path);
-    void create_RSA(std::string key_name);
-    void create_encrypted_file(std::string filename, char *encrypted_content, RSA *key_pair);
-    int public_encrypt(int flen, unsigned char *from, unsigned char *to, RSA *key, int padding = RSA_PKCS1_OAEP_PADDING);
-    int private_decrypt(int flen, unsigned char *from, unsigned char *to, RSA *key, int padding = RSA_PKCS1_OAEP_PADDING);
-    int login_authentication(std::string key_name);
+    void create_keypair(std::string key_name);
+    void save_file(std::string filename, char *content, size_t n);
+    int encrypt(int flen, unsigned char *from, unsigned char *to, RSA *key, int padding = RSA_PKCS1_OAEP_PADDING);
+    int decrypt(int flen, unsigned char *from, unsigned char *to, RSA *key, int padding = RSA_PKCS1_OAEP_PADDING);
+    int authenticate(std::string key_name);
     int initial_setup();
-    int user_folder_setup(std::string new_username);
-    std::string hash_to_val(std::string sha);
+    int user_setup(std::string username);
     std::string hash(std::string name);
 }
 

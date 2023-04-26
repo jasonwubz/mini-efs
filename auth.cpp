@@ -38,14 +38,14 @@ RSA *auth::User::get_key(int type)
     }
 
     if (type == AUTH_KEY_TYPE_PUBLIC) {
-        if (RSA_size(publicKey) != 0) {
+        if (publicKey != NULL) {
             return publicKey;
         }
         path = "./publickeys/" + auth::hash(username + "_publickey");
         publicKey = auth::get_key(type, path);
         return publicKey;
     } else if (type == AUTH_KEY_TYPE_PRIVATE) {
-        if (RSA_size(privateKey) != 0) {
+        if (privateKey != NULL) {
             return privateKey;
         }
         path = "./privatekeys/" + auth::hash(username);
@@ -53,7 +53,7 @@ RSA *auth::User::get_key(int type)
         return privateKey;
     }
 
-    return RSA_new();
+    return NULL;
 }
 
 std::string auth::csprng()
@@ -63,7 +63,7 @@ std::string auth::csprng()
     std::ostringstream result_stream;
 
     if (RAND_bytes(ran_buf, rsize) != 1) {
-        std::cout << "Error generating private key name";
+        std::cout << "Error generating random bytes";
         return "";
     }
 
@@ -83,13 +83,13 @@ bool auth::is_admin(std::string username)
 }
 
 // This function implement RSA public key encryption
-int auth::public_encrypt(int flen, unsigned char *from, unsigned char *to, RSA *key, int padding)
+int auth::encrypt(int flen, unsigned char *from, unsigned char *to, RSA *key, int padding)
 {
     return RSA_public_encrypt(flen, from, to, key, padding);
 }
 
 // This function implement RSA private key decryption
-int auth::private_decrypt(int flen, unsigned char *from, unsigned char *to, RSA *key, int padding)
+int auth::decrypt(int flen, unsigned char *from, unsigned char *to, RSA *key, int padding)
 {
     return RSA_private_decrypt(flen, from, to, key, padding);
 }
@@ -98,52 +98,40 @@ int auth::private_decrypt(int flen, unsigned char *from, unsigned char *to, RSA 
 RSA *auth::get_key(int type, std::string path)
 {
     FILE *fp  = NULL;
-    RSA *rsa = NULL;
+    RSA *key = NULL;
 
     fp = fopen(&path[0], "rb");
     if (fp == NULL) {
-        return rsa;
+        return key;
     }
 
     if (type == AUTH_KEY_TYPE_PUBLIC) {
-        PEM_read_RSAPublicKey(fp, &rsa, NULL, NULL);
+        PEM_read_RSAPublicKey(fp, &key, NULL, NULL);
         fclose(fp);
     } else if (type == AUTH_KEY_TYPE_PRIVATE) {
-        PEM_read_RSAPrivateKey(fp, &rsa, NULL, NULL);
+        PEM_read_RSAPrivateKey(fp, &key, NULL, NULL);
         fclose(fp);
     }
 
-    return rsa;
+    return key;
 }
 
-void auth::create_encrypted_file(std::string filename, char *encrypted_content, RSA *key_pair)
+void auth::save_file(std::string filename, char *content, size_t n)
 {
-    FILE *encrypted_file = fopen(&filename[0], "wb");
-    if (encrypted_file == nullptr) {
+    FILE *fp = fopen(&filename[0], "wb");
+    if (fp == nullptr) {
         std::cout << "Unable to create file, please check directory permissions" << std::endl;
         return;
     }
-    fwrite(encrypted_content, sizeof(*encrypted_content), RSA_size(key_pair), encrypted_file);
-    fclose(encrypted_file);
-}
-
-// Read metadata.json, use hash as key to get back original value
-std::string auth::hash_to_val(std::string hash)
-{
-    std::ifstream ifs("metadata.json");
-    Json::Value metadata;
-    Json::CharReaderBuilder builder;
-    JSONCPP_STRING err;
-    Json::parseFromStream(builder, ifs, &metadata, &err);
-
-    return metadata[hash].asString();
+    fwrite(content, sizeof(*content), n, fp);
+    fclose(fp);
 }
 
 // SHA-256 hash value of given string
 std::string auth::hash(std::string value)
 {
     // Append salt before calculating the sha256 hash. Makes dictionary attacks less effective
-    std::string salt = auth::hash_to_val("salt");
+    std::string salt = metadata::get("salt");
     value += salt;
     unsigned char hash[SHA256_DIGEST_LENGTH];
     SHA256_CTX sha256;
@@ -157,77 +145,67 @@ std::string auth::hash(std::string value)
     return hashStream.str();
 }
 
-int auth::login_authentication(std::string key_name){
-    RSA *private_key;
-    RSA *public_key;
-    std::string public_key_path, private_key_path, username;
+int auth::authenticate(std::string key_name)
+{
+    auth::User unauthUser; // unauthenticated user
+    RSA *publicKey;
+    RSA *privateKey;
+    std::string username;
 
     size_t pos = key_name.find("_");
     username = key_name.substr(0,pos);
 
-    std::string publickey_name = username + "_publickey";
-    std::string privatekey_name = key_name + "_privatekey";
-    
-    public_key_path = "./publickeys/" + auth::hash(publickey_name);
-    public_key = auth::get_key(AUTH_KEY_TYPE_PUBLIC, public_key_path);    
+    unauthUser.set_user(username);
 
-    if (auth::is_admin(username)) {
-        private_key_path = auth::hash(privatekey_name);
-    } else {
-        private_key_path = "./filesystem/" + auth::hash(username) + "/" + auth::hash(privatekey_name);
-    }
-    private_key = auth::get_key(AUTH_KEY_TYPE_PRIVATE, private_key_path);
-    
-    if (public_key == NULL || private_key == NULL){
-        //not such key by searching the provided key_name
-        // cout << "Invalid key_name is provided. Fileserver closed." << endl;
+    publicKey = unauthUser.get_key(AUTH_KEY_TYPE_PUBLIC);
+    privateKey = unauthUser.get_key(AUTH_KEY_TYPE_PRIVATE);
+
+    if (publicKey == NULL || privateKey == NULL){
         return 1;
-    } else {
-        // Successfully read public key and private key. Now User authentication
-        // We uses private key to decrypt a message that was encrypted with the corresponding public key.
-        // If the decryption is successful, the user is authenticated and can proceed with the session.
+    } 
+    
+    // Now User authentication
+    // We uses private key to decrypt a message that was encrypted with the corresponding public key.
+    // If the decryption is successful, the user is authenticated and can proceed with the session.
 
-        char message[] = "My secret";
-        char *encrypt = NULL;
-        char *decrypt = NULL;
+    char message[] = "My secret";
+    char *encryptedContent = NULL;
+    char *decryptedContent = NULL;
 
-        // Do RSA encryption using public key
-        encrypt = (char *)malloc(RSA_size(public_key));
-        int encrypt_length = public_encrypt(strlen(message) + 1, (unsigned char *)message, (unsigned char *)encrypt, public_key);
-        if(encrypt_length == -1) {
-            // cout << "An error occurred in public_encrypt() method" << endl;
-            return 1;
-        }
-        
-        // Try to do RSA decryption using corresponding private key
-        decrypt = (char *)malloc(encrypt_length);
-        int decrypt_length = private_decrypt(encrypt_length, (unsigned char *)encrypt, (unsigned char *)decrypt, private_key);
-        if(decrypt_length == -1) {
-            // cout << "An error occurred in private_decrypt() method" << endl;
-            return 1;
-        }
-        if (strcmp(decrypt, message) == 0){
-            // cout << "Successfully login" << endl;
-            // cout << decrypt << endl;
-            return 0;
-        } else {
-            return 1;
-        }
+    // Do RSA encryption using public key
+    encryptedContent = (char *)malloc(RSA_size(publicKey));
+    int encryptLength = auth::encrypt(strlen(message) + 1, (unsigned char *)message, (unsigned char *)encryptedContent, publicKey);
+    if (encryptLength == -1) {
+        return 1;
     }
+    
+    // Try to do RSA decryption using corresponding private key
+    decryptedContent = (char *)malloc(encryptLength);
+    int decryptLength = auth::decrypt(encryptLength, (unsigned char *)encryptedContent, (unsigned char *)decrypt, privateKey);
+    if (decryptLength == -1) {
+        return 1;
+    }
+
+    if (strcmp(decryptedContent, message) == 0){
+        return 0;
+    }
+
+    return 1;
 }
 
-int auth::user_folder_setup(std::string new_username){
-    std::string root_folder_path = "filesystem/" + auth::hash(new_username);
-    std::string personal_folder_path = root_folder_path + "/" + auth::hash("personal");
-    std::string shared_folder_path = root_folder_path + "/" + auth::hash("shared");
+int auth::user_setup(std::string username)
+{
+    std::string userRootPath = "filesystem/" + auth::hash(username);
+    std::string personalPath = userRootPath + "/" + auth::hash("personal");
+    std::string sharedPath = userRootPath + "/" + auth::hash("shared");
 
-    int status1 = mkdir(&root_folder_path[0], 0744);
-    int status2 = mkdir(&personal_folder_path[0], 0744);
-    int status3 = mkdir(&shared_folder_path[0], 0744);
-
-    if (status1 == 0 && status2 == 0 && status3 == 0) {
-        std::cout << "User " << new_username << " folders created successfully" << std::endl << std::endl;
-        metadata::write(auth::hash(new_username), new_username);
+    if (
+        mkdir(&userRootPath[0], AUTH_DIR_PERMISSION) == 0 &&
+        mkdir(&personalPath[0], AUTH_DIR_PERMISSION) == 0 &&
+        mkdir(&sharedPath[0], AUTH_DIR_PERMISSION) == 0
+    ) {
+        std::cout << "User " << username << " folders created successfully" << std::endl;
+        metadata::write(auth::hash(username), username);
         return 0;
     } else {
         std::cerr << "Failed to create user folders. Please check permission and try again " << std::endl;
@@ -235,121 +213,86 @@ int auth::user_folder_setup(std::string new_username){
     }
 }
 
-// This function will create public/private key pairs under /publickeys folder and /privatekeys folder
-// keyfile's naming convension: username_randomnumber_publickey and username_randomnumber_privatekey
-void auth::create_RSA(std::string key_name) {
+RSA *_create_key_pair()
+{
+    BIGNUM *bne = NULL;
+    bne = BN_new();
+    BN_set_word(bne, 59);
+
+    RSA *keypair = NULL;
+    keypair = RSA_new();
+    RSA_generate_key_ex(keypair, 4096, bne, NULL);
+
+    return keypair;
+}
+
+int _create_key(int type, std::string path, RSA *key)
+{
+    int result = -1;
+    FILE *fp = fopen(&path[0], "w");
+    if (type == AUTH_KEY_TYPE_PRIVATE) {
+        result = PEM_write_RSAPrivateKey(fp, key, NULL, NULL, 0, NULL, NULL);
+    } else if (type == AUTH_KEY_TYPE_PUBLIC) {
+        result = PEM_write_RSAPublicKey(fp, key);
+    }
+    std::cout << "result" << result << std::endl;
+    return result;
+}
+
+// Create public/private key pairs under /publickeys folder and /privatekeys folder
+// keyfile's naming convention: username_randomnumber_publickey and username_randomnumber_privatekey
+void auth::create_keypair(std::string key_name)
+{
     size_t pos = key_name.find("_");
-    std::string username = key_name.substr(0,pos);
+    std::string username = key_name.substr(0, pos);
+
+    std::string publickey_name = username + "_publickey";
+    std::string privatekey_name = key_name + "_privatekey";
+    std::string publickey_name_sha = auth::hash(publickey_name);
+    std::string privatekey_name_sha = auth::hash(privatekey_name);
+    std::string publickey_path = "./publickeys/" + publickey_name_sha;
+    std::string privatekey_path;
+
+    metadata::write(publickey_name_sha, publickey_name);
+    metadata::write(privatekey_name_sha, privatekey_name);
+
+    RSA *keypair = _create_key_pair();
+
+    // generate public key and store to local
+    _create_key(AUTH_KEY_TYPE_PUBLIC, publickey_path, keypair);
 
     if (username == "admin") {
-        std::string publickey_name = username + "_publickey";
-        std::string privatekey_name = key_name + "_privatekey";
-        std::string publickey_name_sha = auth::hash(publickey_name);
-        std::string privatekey_name_sha = auth::hash(privatekey_name);
+        privatekey_path = privatekey_name_sha;
 
-        std::string publickey_path = "./publickeys/" + publickey_name_sha;
-        std::string privatekey_path = privatekey_name_sha;
-
-        metadata::write(publickey_name_sha, publickey_name);
-        metadata::write(privatekey_name_sha, privatekey_name);
-        
-        RSA *rsa = NULL;
-        FILE *fp  = NULL;
-        FILE *fp1  = NULL;
-
-        BIGNUM *bne = NULL;
-        bne = BN_new();
-        BN_set_word(bne, 59);
-
-        RSA *keypair = NULL;
-        keypair = RSA_new();
-        //2048 bit key
-        RSA_generate_key_ex(keypair, 4096, bne, NULL);
-
-        //generate public key and store to local
-        fp = fopen(&publickey_path[0], "w");
-        PEM_write_RSAPublicKey(fp, keypair);
-        fclose(fp);
-        
-        //generate private key and store to local
-        fp1 = fopen(&privatekey_path[0], "w");
-        PEM_write_RSAPrivateKey(fp1, keypair, NULL, NULL, 0, NULL, NULL);
-        fclose(fp1);
+        // generate private key and store to local
+        _create_key(AUTH_KEY_TYPE_PRIVATE, privatekey_path, keypair);
     } else {
-        // normal user's public key & private key file creation
-        std::string publickey_name = username + "_publickey";
-        std::string privatekey_name = key_name + "_privatekey";
+        privatekey_path = "filesystem/" + auth::hash(username) + "/" + auth::hash(privatekey_name);
+        _create_key(AUTH_KEY_TYPE_PRIVATE, privatekey_path, keypair);
 
-        std::string publickey_name_sha = auth::hash(publickey_name);
-        std::string privatekey_name_sha = auth::hash(privatekey_name);
-
-        metadata::write(publickey_name_sha, publickey_name);
-        metadata::write(privatekey_name_sha, privatekey_name);
-
-        std::string publickey_path = "./publickeys/" + auth::hash(publickey_name);
-        std::string privatekey_path = "filesystem/" + auth::hash(username) + "/" + auth::hash(privatekey_name);
         std::string privatekey_foradmin_path = "./privatekeys/" + auth::hash(username) ;
-        
-        RSA *rsa = NULL;
-        FILE *fp  = NULL;
-        FILE *fp1  = NULL;
-        FILE *fp2  = NULL;
-
-        BIGNUM *bne = NULL;
-        bne = BN_new();
-        BN_set_word(bne, 59);
-
-        RSA *keypair = NULL;
-        keypair = RSA_new();
-        RSA_generate_key_ex(keypair, 4096, bne, NULL);
-
-        //generate public key and store to local
-        fp = fopen(&publickey_path[0], "w");
-        PEM_write_RSAPublicKey(fp, keypair);
-        fclose(fp);
-        
-        //generate private key and store to local
-        fp1 = fopen(&privatekey_path[0], "w");
-        PEM_write_RSAPrivateKey(fp1, keypair, NULL, NULL, 0, NULL, NULL);
-        fclose(fp1);
-
-        //Store a copy of private key in privatekeys for admin usage only
-        fp2 = fopen(&privatekey_foradmin_path[0], "w");
-        PEM_write_RSAPrivateKey(fp2, keypair, NULL, NULL, 0, NULL, NULL);
-        fclose(fp2);
+        _create_key(AUTH_KEY_TYPE_PRIVATE, privatekey_foradmin_path, keypair);
     }
 }
 
 int auth::initial_setup()
 {
-    //create "filesystem", "privatekeys","publickeys" folders
+    // Create "filesystem", "privatekeys","publickeys" folders
     if (
         mkdir("filesystem", AUTH_DIR_PERMISSION) == 0 &&
         mkdir("privatekeys", AUTH_DIR_PERMISSION) == 0 &&
         mkdir("publickeys", AUTH_DIR_PERMISSION) == 0
-    ){
+    ) {
         std::cout << "Filesystem created successfully" << std::endl << std::endl;
     } else {
         std::cerr << "Failed to create filesystem. Please check permission and try again " << std::endl;
         return 1;
     }
 
-    // Create an empty json file metadata.json
-    Json::Value metadata;
+    // Generate salt and create metadata
+    std::string salt = auth::csprng();
 
-    std::ofstream ofs("./metadata.json");
-    Json::StreamWriterBuilder writerBuilder;
-    std::unique_ptr<Json::StreamWriter> writer(writerBuilder.newStreamWriter());
-
-
-    //Generate random salt value using cryptographically secure random function
-    std::string random_salt = auth::csprng();
-
-    metadata["salt"] = random_salt;
-    // metadata[auth::hash("personal")] = "personal";
-    // metadata[auth::hash("shared")] = "shared";
-
-    if (writer->write(metadata, &ofs) != 0) {
+    if (metadata::setup(salt)) {
         std::cerr << "Failed to create filesystem. Please check permission and try again " << std::endl;
         return 1;
     }

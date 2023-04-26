@@ -22,7 +22,7 @@ void command::adduser(auth::User &currentUser, std::string username)
     }
 
     // create user folders
-    int result = auth::user_folder_setup(username);
+    int result = auth::user_setup(username);
     if (result) {
         return;
     }
@@ -33,7 +33,7 @@ void command::adduser(auth::User &currentUser, std::string username)
     }
     std::string key_name = username + "_" + randomKey;
     
-    auth::create_RSA(key_name);
+    auth::create_keypair(key_name);
     std::cout << "User " << username << " Public/Private key pair has been created." << std::endl;
     std::cout << "The private key_name is " << key_name << std::endl;
     std::cout << "Please give this key_name to user and let user know that it must be remained secret to him/herself only." << std::endl;
@@ -76,9 +76,9 @@ void command::ls(auth::User &currentUser, std::vector<std::string>&dir)
         }
         std::string display_path;
         if (sub_path[0] == '/') {
-            display_path = auth::hash_to_val(full_path.substr(cur_dir.length() + 1));
+            display_path = metadata::get(full_path.substr(cur_dir.length() + 1));
         } else {
-            display_path = auth::hash_to_val(full_path.substr(cur_dir.length()));
+            display_path = metadata::get(full_path.substr(cur_dir.length()));
         }
         if (display_path != "") {
             std::cout << prefix + display_path << std::endl;
@@ -108,16 +108,17 @@ void command::help(auth::User &currentUser)
     std::cout << "help                         - This help page" << std::endl;
 }
 
-std::string command::pwd(auth::User &currentUser, std::vector<std::string>& dir)
+std::string command::pwd(std::vector<std::string>& dir)
 {
     std::string result;
     if (dir.empty()) {
-        result += "/";
-    } else {
-        for (std::string str:dir) {
-            result += "/" + str;
-        }
+        return "/";
     }
+
+    for (std::string str:dir) {
+        result += "/" + str;
+    }
+
     return result;
 }
 
@@ -129,7 +130,7 @@ void command::cd(auth::User &currentUser, std::vector<std::string>& dir, std::st
     std::vector<std::string> new_dir;
 
     // split input by '/'
-    while(getline(test, segment, '/')) {
+    while (getline(test, segment, '/')) {
         seglist.push_back(segment);
     }
     
@@ -166,7 +167,7 @@ void command::cd(auth::User &currentUser, std::vector<std::string>& dir, std::st
     if (std::filesystem::is_directory(std::filesystem::status(check_dir)) ) {
         dir = new_dir;
         std::cout << "Change directory to: ";
-        std::cout << command::pwd(currentUser, dir) << std::endl; 
+        std::cout << command::pwd(dir) << std::endl; 
     } else {
         std::cout << "Invalid directory!" << std::endl;
     }
@@ -211,7 +212,7 @@ void command::makedir(auth::User &currentUser, std::vector<std::string>& dir, st
     }
 }
 
-void command::mkfile(auth::User &currentUser, const std::string& username, const std::string& filename, const std::string& curr_dir, const std::string& contents)
+void command::mkfile(auth::User &currentUser, const std::string& filename, const std::string& curr_dir, const std::string& contents)
 {
     if (currentUser.isAdmin) {
         std::cout << "Sorry, admin cannot create files" << std::endl;
@@ -225,7 +226,7 @@ void command::mkfile(auth::User &currentUser, const std::string& username, const
     char *message = new char[contents.length() + 1];
     strcpy(message, contents.c_str());
 
-    char *encrypt;
+    char *encryptedContent;
 
     RSA *public_key = currentUser.get_key(AUTH_KEY_TYPE_PUBLIC);
 
@@ -234,20 +235,20 @@ void command::mkfile(auth::User &currentUser, const std::string& username, const
         return;
     }
 
-    encrypt = (char *)malloc(RSA_size(public_key));
-    int encrypt_length = auth::public_encrypt(strlen(message) + 1, (unsigned char *)message, (unsigned char *)encrypt, public_key);
+    encryptedContent = (char *)malloc(RSA_size(public_key));
+    int encrypt_length = auth::encrypt(strlen(message) + 1, (unsigned char *)message, (unsigned char *)encryptedContent, public_key);
     if (encrypt_length == -1) {
-        std::cout << "An error occurred in public_encrypt() method" << std::endl;
+        std::cout << "An error occurred during encryption" << std::endl;
         return;
     }
 
-    auth::create_encrypted_file(full_path, encrypt, public_key);
+    auth::save_file(full_path, encryptedContent, RSA_size(public_key));
 
     // check for expected shared file and update it
     std::string expected_path_suffix = "/" + auth::hash("shared") + "/" + auth::hash(currentUser.username) + "/" + hashed_filename;
     for (const auto & entry : std::filesystem::directory_iterator("./filesystem")) {
         std::string full_path = entry.path();
-        std::string shared_user = auth::hash_to_val(full_path.substr(13));
+        std::string shared_user = metadata::get(full_path.substr(13));
         full_path += expected_path_suffix;
         // cout << full_path << endl;
         if (std::filesystem::exists(full_path)) {
@@ -259,16 +260,16 @@ void command::mkfile(auth::User &currentUser, const std::string& username, const
             }
 
             char* share_encrypted_content = (char *)malloc(RSA_size(target_public_key));
-            int share_encrypt_length = auth::public_encrypt(contents.length() + 1, (unsigned char *)contents.c_str(), (unsigned char *)share_encrypted_content, target_public_key);
+            int share_encrypt_length = auth::encrypt(contents.length() + 1, (unsigned char *)contents.c_str(), (unsigned char *)share_encrypted_content, target_public_key);
             if (share_encrypt_length == -1) {
                 // failed to encrypt
                 continue;
             }
-            auth::create_encrypted_file(full_path, share_encrypted_content, target_public_key);
+            auth::save_file(full_path, share_encrypted_content, RSA_size(target_public_key));
             free(share_encrypted_content);
         }
     }
-    free(encrypt);
+    free(encryptedContent);
     delete[] message;
 }
 
@@ -371,7 +372,7 @@ void command::sharefile(auth::User &currentUser, std::string username, std::stri
 
     // decrypt file for copying
     char *decrypted_file_content = new char[full_size];
-    int decrypt_length = auth::private_decrypt(full_size, (unsigned char *)file_content, (unsigned char *)decrypted_file_content, private_key);
+    int decrypt_length = auth::decrypt(full_size, (unsigned char *)file_content, (unsigned char *)decrypted_file_content, private_key);
     if (decrypt_length == -1) {
         std::cout << "An error occurred during file share" << std::endl;
         return;
@@ -379,7 +380,7 @@ void command::sharefile(auth::User &currentUser, std::string username, std::stri
 
     // encrypt shared file with target's public key
     char *share_encrypted_content = (char *)malloc(RSA_size(target_public_key));
-    int share_encrypt_length = auth::public_encrypt(strlen(decrypted_file_content) + 1, (unsigned char *)decrypted_file_content, (unsigned char *)share_encrypted_content, target_public_key);
+    int share_encrypt_length = auth::encrypt(strlen(decrypted_file_content) + 1, (unsigned char *)decrypted_file_content, (unsigned char *)share_encrypted_content, target_public_key);
     if (share_encrypt_length == -1) {
         std::cout << "An error occurred during file share" << std::endl;
         return;
@@ -398,7 +399,7 @@ void command::sharefile(auth::User &currentUser, std::string username, std::stri
 
     // now write new file
     std::string target_filepath = target_share_directory + "/" + hashed_filename;
-    auth::create_encrypted_file(target_filepath, share_encrypted_content, target_public_key);
+    auth::save_file(target_filepath, share_encrypted_content, RSA_size(target_public_key));
     std::cout << "File '" << filename << "' has been successfully shared with user '" << target_username << "'" << std::endl;
 }
 
@@ -462,9 +463,9 @@ std::string command::cat(auth::User &currentUser, const std::string& username, c
         return "";
     }
 
-    int decrypt_length = auth::private_decrypt(RSA_size(private_key), (unsigned char *)contents, (unsigned char *)decrypt, private_key);
+    int decrypt_length = auth::decrypt(RSA_size(private_key), (unsigned char *)contents, (unsigned char *)decrypt, private_key);
     if (decrypt_length == -1) {
-        std::cout << "An error occurred in private_decrypt() method" << std::endl;
+        std::cout << "An error occurred during decryption" << std::endl;
     }
 
     std::string output = decrypt;
