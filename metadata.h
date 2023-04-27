@@ -7,8 +7,10 @@
 
 namespace metadata
 {
+    extern const std::string META_FILENAME;
+
     void write(std::string key, std::string value);
-    int setup(std::string salt, std::string filename = "metadata.json");
+    int setup(std::string salt);
     std::string get(std::string key);
 }
 

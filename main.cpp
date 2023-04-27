@@ -14,7 +14,6 @@
 #include <iomanip>
 #include <sys/stat.h>
 #include <sys/types.h>
-#include <jsoncpp/json/json.h>
 
 std::vector<std::string> split_string(const std::string& ipstr, const std::string& delimiter)
 {
@@ -52,12 +51,12 @@ bool isWhitespace(std::string s)
 
 int main(int argc, char** argv)
 {
-    std::string user_command, key_name;
+    std::string user_command;
     auth::User currentUser;
 
     if (argc != 2) {
-        std::cout << "Wrong command to start the fileserver. You should use command: " << std::endl;
-        std::cout << "./fileserver key_name" << std::endl;
+        std::cerr << "Wrong command to start the fileserver. You should use command: " << std::endl;
+        std::cerr << "./fileserver key_name" << std::endl;
         return 1;
     }
 
@@ -65,52 +64,26 @@ int main(int argc, char** argv)
     std::cout << "     You are accessing Encrypted Secure File System     " << std::endl;
     std::cout << "--------------------------------------------------------" << std::endl << std::endl;
 
-    struct stat st, st1, st2;
-    if (stat("filesystem", &st) == -1 && stat("privatekeys", &st1) == -1 && stat("publickeys", &st2) == -1) {
-        //Initial Setup
-        std::cout << "No file system exists yet. Execute Initial setup..." << std::endl << std::endl;
-
-        if (auth::initial_setup() == 1) {
-            return 1;
-        }
-
-        metadata::write(auth::hash("personal"), "personal");
-        metadata::write(auth::hash("shared"), "shared");
-
-        std::string username = "admin";
-        std::string randomKey = auth::csprng();
-        if (randomKey.length() == 0) {
-            return 1;
-        }
-        std::string key_name = username + "_" + randomKey;
-
-        auth::create_keypair(key_name);
-        std::cout << "Admin Public/Private key pair has been created." << std::endl;
-        std::cout << "Your private key_name is " << key_name << std::endl;
-        std::cout << "Please store your key_name safely. Admin can login by command: " << std::endl;
-        std::cout << "./fileserver " << key_name << std::endl << std::endl;
-
-        std::cout << "Initial setup finshed, Fileserver closed. Admin now can login using the admin keyfile" << std::endl;
-        return 0;
-
-    } else if (stat("filesystem", &st) == -1 || stat("privatekeys", &st1) == -1 || stat("publickeys", &st2) == -1) {
-        std::cout << "Partial file system exist. Please remove folder filesystem/privatekeys/publickeys and try again." << std::endl;
-        return 1;
-    } else {
-        // Time to do user authentication
-
-        key_name = argv[1];
-        int login_result = auth::authenticate(key_name);
-        if (login_result == 1) {
-            std::cout << "Invalid key_name is provided. Fileserver closed." << std::endl;
-            return 1;
-        } else {
-            size_t pos = key_name.find("_");
-            std::string username = key_name.substr(0,pos);
-            currentUser.set_user(username);
-            std::cout << "Welcome! Logged in as " << username << std::endl;
+    try {
+        std::string key_name = argv[1];
+        int validateResult = auth::validate(key_name, currentUser);
+        if (validateResult == 0) {
+            std::cout << "Welcome! Logged in as " << currentUser.username << std::endl;
             command::help(currentUser);
+        } else if (validateResult == 1) {
+            std::cout << "Setting up environment..." << std::endl << std::endl;
+            std::cout << "Admin Public/Private key pair has been created." << std::endl;
+            std::cout << "Your private key_name is " << key_name << std::endl;
+            std::cout << "Please store your key_name safely. Admin can login by command: " << std::endl;
+            std::cout << "./fileserver " << key_name << std::endl << std::endl;
+            std::cout << "Initial setup finshed, Fileserver closed. Admin now can login using the admin keyfile" << std::endl;
+            return 0;
+        } else {
+            return 1;
         }
+    } catch (auth::AuthException a) {
+        std::cerr << a.what() << std::endl;
+        return 1;
     }
 
     std::vector<std::string> dir;
@@ -129,13 +102,13 @@ int main(int argc, char** argv)
         } else if (user_command == "pwd") {
             std::cout << command::pwd(dir) << std::endl;
         } else if (user_command.substr(0, 2) == "cd" && user_command.substr(2, 1) == " ") {
-            command::cd(currentUser, dir, user_command.substr(3), currentUser.username);
+            command::cd(currentUser, dir, user_command.substr(3));
         } else if (user_command == "ls") {
             command::ls(currentUser, dir);
         } else if (user_command.substr(0,5) == "mkdir" && user_command.substr(5,1) == " " && !isWhitespace(user_command.substr(6)) ) {
-            command::makedir(currentUser, dir, user_command.substr(6), currentUser.username);
+            command::makedir(currentUser, dir, user_command.substr(6));
         } else if (user_command.rfind("share", 0) == 0) {
-            command::sharefile(currentUser, currentUser.username, key_name, dir, user_command);
+            command::sharefile(currentUser, dir, user_command);
         } else if (splits[0] == "cat") {
             if (splits.size() < 2) {
                 std::cout << "Please provide filename" << std::endl;
@@ -165,7 +138,7 @@ int main(int argc, char** argv)
             if (currentUser.isAdmin) {
                 catUsername = dir[0];
             }
-            std::string contents = command::cat(currentUser, catUsername, splits[1], curr_dir_hashed, key_name);
+            std::string contents = command::cat(currentUser, catUsername, splits[1], curr_dir_hashed);
             std::cout << contents << std::endl;
         } else if (splits[0] == "mkfile") {
             if (splits.size() < 3 || splits[2].empty()) {
@@ -242,4 +215,6 @@ int main(int argc, char** argv)
             std::cout << "Invalid command." << std::endl;
         }
     }
+
+    return 0;
 }

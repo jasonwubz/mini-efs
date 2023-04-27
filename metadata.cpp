@@ -9,11 +9,12 @@
 #include <sys/stat.h>
 #include <jsoncpp/json/json.h>
 
+const std::string metadata::META_FILENAME = "metadata.json";
+
 // Write key: value pair to metadata file
 void metadata::write(std::string key, std::string value)
 {
-    const std::string filename = "metadata.json";
-    std::ifstream ifs(filename);
+    std::ifstream ifs(metadata::META_FILENAME);
     Json::Value metadata;
     Json::CharReaderBuilder builder;
     JSONCPP_STRING err;
@@ -23,7 +24,7 @@ void metadata::write(std::string key, std::string value)
     metadata[key] = value;
 
     // Write the modified Json::Value object back to the JSON file
-    std::ofstream ofs(filename);
+    std::ofstream ofs(metadata::META_FILENAME);
     Json::StreamWriterBuilder writerBuilder;
     std::unique_ptr<Json::StreamWriter> writer(writerBuilder.newStreamWriter());
     writer->write(metadata, &ofs);
@@ -31,10 +32,10 @@ void metadata::write(std::string key, std::string value)
     ofs.close();
 }
 
-int metadata::setup(std::string salt, std::string filename)
+int metadata::setup(std::string salt)
 {
     Json::Value metadata;
-    std::ofstream ofs(filename);
+    std::ofstream ofs(metadata::META_FILENAME);
     Json::StreamWriterBuilder writerBuilder;
     std::unique_ptr<Json::StreamWriter> writer(writerBuilder.newStreamWriter());
 
@@ -43,10 +44,10 @@ int metadata::setup(std::string salt, std::string filename)
     return writer->write(metadata, &ofs);
 }
 
-// Read metadata.json, use hash as key to get back original value
+// Read metadata file, use hash as key to get back original value
 std::string metadata::get(std::string hash)
 {
-    std::ifstream ifs("metadata.json");
+    std::ifstream ifs(metadata::META_FILENAME);
     Json::Value metadata;
     Json::CharReaderBuilder builder;
     JSONCPP_STRING err;

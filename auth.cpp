@@ -16,13 +16,33 @@
 #include <sys/stat.h>
 #include <jsoncpp/json/json.h>
 
+const std::string auth::AUTH_DIR_FILESYSTEM = "filesystem";
+const std::string auth::AUTH_DIR_PUBLICKEYS = "publickeys";
+const std::string auth::AUTH_DIR_PRIVATEKEYS = "privatekeys";
+
+auth::AuthException::AuthException(std::string msg)
+{
+     message = msg;
+}
+
+std::string auth::AuthException::what()
+{
+    return message;
+}
+
 // Initialize user values
-void auth::User::set_user(std::string u)
+void auth::User::set_user(std::string u, std::string k)
 {
     username = u;
     isAdmin = false;
+    privateKey = NULL;
+    publicKey = NULL;
+
     if (strcasecmp(username.c_str(), "admin") == 0) {
         isAdmin = true;
+    }
+    if (k.length() > 0) {
+        keyName = k;
     }
 }
 
@@ -30,12 +50,6 @@ void auth::User::set_user(std::string u)
 RSA *auth::User::get_key(int type)
 {
     std::string path;
-
-    if (type == AUTH_KEY_TYPE_PUBLIC) {
-        path = "./publickeys/" + auth::hash(username + "_publickey");
-    } else if (type == AUTH_KEY_TYPE_PRIVATE) {
-        path = "./privatekeys/" + auth::hash(username);
-    }
 
     if (type == AUTH_KEY_TYPE_PUBLIC) {
         if (publicKey != NULL) {
@@ -56,6 +70,24 @@ RSA *auth::User::get_key(int type)
     return NULL;
 }
 
+RSA *auth::User::private_key_by_name()
+{
+    if (privateKey != NULL) {
+        return privateKey;
+    }
+    std::cout << "DEBUG:" << keyName + "_privatekey" << std::endl;
+    std::string path;
+    if (isAdmin) {
+        path = auth::hash(keyName + "_privatekey");
+    } else {
+        path = "./filesystem/" + auth::hash(username) + "/" + auth::hash(keyName + "_privatekey");
+    }
+
+    privateKey = auth::get_key(AUTH_KEY_TYPE_PRIVATE, path);
+    return privateKey;
+}
+
+// Generate random bytes as hex string
 std::string auth::csprng()
 {
     constexpr size_t rsize = 32;
@@ -63,7 +95,6 @@ std::string auth::csprng()
     std::ostringstream result_stream;
 
     if (RAND_bytes(ran_buf, rsize) != 1) {
-        std::cout << "Error generating random bytes";
         return "";
     }
 
@@ -97,6 +128,7 @@ int auth::decrypt(int flen, unsigned char *from, unsigned char *to, RSA *key, in
 // Get RSA (public or private) key specified by path
 RSA *auth::get_key(int type, std::string path)
 {
+    std::cout << "DEBUG:" << path << std::endl;
     FILE *fp  = NULL;
     RSA *key = NULL;
 
@@ -112,6 +144,8 @@ RSA *auth::get_key(int type, std::string path)
         PEM_read_RSAPrivateKey(fp, &key, NULL, NULL);
         fclose(fp);
     }
+
+    std::cout << "DEBUG: file opened" << path << std::endl;
 
     return key;
 }
@@ -154,13 +188,12 @@ int auth::authenticate(std::string key_name)
 
     size_t pos = key_name.find("_");
     username = key_name.substr(0,pos);
-
-    unauthUser.set_user(username);
-
+    unauthUser.set_user(username, key_name);
+    
     publicKey = unauthUser.get_key(AUTH_KEY_TYPE_PUBLIC);
-    privateKey = unauthUser.get_key(AUTH_KEY_TYPE_PRIVATE);
+    privateKey = unauthUser.private_key_by_name();
 
-    if (publicKey == NULL || privateKey == NULL){
+    if (publicKey == NULL || privateKey == NULL) {
         return 1;
     } 
     
@@ -172,6 +205,8 @@ int auth::authenticate(std::string key_name)
     char *encryptedContent = NULL;
     char *decryptedContent = NULL;
 
+    std::cout << "DEBUG: checking secret" << std::endl;
+
     // Do RSA encryption using public key
     encryptedContent = (char *)malloc(RSA_size(publicKey));
     int encryptLength = auth::encrypt(strlen(message) + 1, (unsigned char *)message, (unsigned char *)encryptedContent, publicKey);
@@ -181,7 +216,7 @@ int auth::authenticate(std::string key_name)
     
     // Try to do RSA decryption using corresponding private key
     decryptedContent = (char *)malloc(encryptLength);
-    int decryptLength = auth::decrypt(encryptLength, (unsigned char *)encryptedContent, (unsigned char *)decrypt, privateKey);
+    int decryptLength = auth::decrypt(encryptLength, (unsigned char *)encryptedContent, (unsigned char *)decryptedContent, privateKey);
     if (decryptLength == -1) {
         return 1;
     }
@@ -200,17 +235,15 @@ int auth::user_setup(std::string username)
     std::string sharedPath = userRootPath + "/" + auth::hash("shared");
 
     if (
-        mkdir(&userRootPath[0], AUTH_DIR_PERMISSION) == 0 &&
-        mkdir(&personalPath[0], AUTH_DIR_PERMISSION) == 0 &&
-        mkdir(&sharedPath[0], AUTH_DIR_PERMISSION) == 0
+        mkdir(&userRootPath[0], AUTH_DIR_PERMISSION) != 0 ||
+        mkdir(&personalPath[0], AUTH_DIR_PERMISSION) != 0 ||
+        mkdir(&sharedPath[0], AUTH_DIR_PERMISSION) != 0
     ) {
-        std::cout << "User " << username << " folders created successfully" << std::endl;
-        metadata::write(auth::hash(username), username);
-        return 0;
-    } else {
         std::cerr << "Failed to create user folders. Please check permission and try again " << std::endl;
         return 1;
     }
+    metadata::write(auth::hash(username), username);
+    return 0;
 }
 
 RSA *_create_key_pair()
@@ -235,7 +268,6 @@ int _create_key(int type, std::string path, RSA *key)
     } else if (type == AUTH_KEY_TYPE_PUBLIC) {
         result = PEM_write_RSAPublicKey(fp, key);
     }
-    std::cout << "result" << result << std::endl;
     return result;
 }
 
@@ -261,6 +293,8 @@ void auth::create_keypair(std::string key_name)
     // generate public key and store to local
     _create_key(AUTH_KEY_TYPE_PUBLIC, publickey_path, keypair);
 
+    std::cout << "DEBUG:" << username << std::endl;
+
     if (username == "admin") {
         privatekey_path = privatekey_name_sha;
 
@@ -279,23 +313,69 @@ int auth::initial_setup()
 {
     // Create "filesystem", "privatekeys","publickeys" folders
     if (
-        mkdir("filesystem", AUTH_DIR_PERMISSION) == 0 &&
-        mkdir("privatekeys", AUTH_DIR_PERMISSION) == 0 &&
-        mkdir("publickeys", AUTH_DIR_PERMISSION) == 0
+        mkdir("filesystem", AUTH_DIR_PERMISSION) != 0 ||
+        mkdir("privatekeys", AUTH_DIR_PERMISSION) != 0 ||
+        mkdir("publickeys", AUTH_DIR_PERMISSION) != 0
     ) {
-        std::cout << "Filesystem created successfully" << std::endl << std::endl;
-    } else {
-        std::cerr << "Failed to create filesystem. Please check permission and try again " << std::endl;
-        return 1;
+        throw auth::AuthException("Failed to create filesystem. Please check permission and try again.");
     }
 
     // Generate salt and create metadata
     std::string salt = auth::csprng();
 
     if (metadata::setup(salt)) {
-        std::cerr << "Failed to create filesystem. Please check permission and try again " << std::endl;
-        return 1;
+        throw auth::AuthException("Failed to create filesystem. Please check permission and try again.");
     }
 
+    return 0;
+}
+
+// Returns 1 on initial setup and 0 on authenticated
+int auth::validate(std::string &key_name, auth::User &currentUser)
+{
+    struct stat filesystemStat, publicKeyStat, privateKeyStat;
+    int filesystemResult, publicKeyResult, privateKeyResult;
+
+    filesystemResult = stat(auth::AUTH_DIR_FILESYSTEM.c_str(), &filesystemStat);
+    publicKeyResult = stat(auth::AUTH_DIR_PUBLICKEYS.c_str(), &publicKeyStat);
+    privateKeyResult = stat(auth::AUTH_DIR_PRIVATEKEYS.c_str(), &privateKeyStat);
+
+    if (
+        filesystemResult == -1 &&
+        publicKeyResult == -1 &&
+        privateKeyResult == -1
+    ) {
+        //Initial Setup
+        if (auth::initial_setup() == 1) {
+            throw auth::AuthException("Unable to perform initial setup. Please try again.");
+        }
+
+        metadata::write(auth::hash("personal"), "personal");
+        metadata::write(auth::hash("shared"), "shared");
+
+        std::string username = "admin";
+        std::string randomKey = auth::csprng();
+        if (randomKey.length() == 0) {
+            throw auth::AuthException("Unable to generate random key. Please try again.");
+        }
+        key_name = username + "_" + randomKey;
+
+        auth::create_keypair(key_name);
+        return 1;
+    } else if (
+        filesystemResult == -1 ||
+        publicKeyResult == -1 ||
+        privateKeyResult == -1) {
+        throw auth::AuthException("Partial file system exist. Please remove folder filesystem/privatekeys/publickeys and try again.");
+    } else {
+        int login_result = auth::authenticate(key_name);
+        if (login_result == 1) {
+            throw auth::AuthException("Invalid key_name is provided. Fileserver closed.");
+        } else {
+            size_t pos = key_name.find("_");
+            std::string username = key_name.substr(0,pos);
+            currentUser.set_user(username, key_name);
+        }
+    }
     return 0;
 }
