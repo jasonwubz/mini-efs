@@ -30,16 +30,6 @@ std::vector<std::string> split_string(const std::string& ipstr, const std::strin
     return splits;
 }
 
-bool check_invalid_username(std::string username)
-{
-    for (int i=0;i<username.length();i++) {
-        if (!std::isalpha(username[i]) && !std::isdigit(username[i])) {
-            return false;
-        }
-    }
-    return true;
-}
-
 bool isWhitespace(std::string s)
 {
     for (int index = 0; index < s.length(); index++) {
@@ -53,6 +43,7 @@ int main(int argc, char** argv)
 {
     std::string user_command;
     auth::User currentUser;
+    std::vector<std::string> dir;
 
     if (argc != 2) {
         std::cerr << "Wrong command to start the fileserver. You should use command: " << std::endl;
@@ -79,6 +70,7 @@ int main(int argc, char** argv)
             std::cout << "Initial setup finshed, Fileserver closed. Admin now can login using the admin keyfile" << std::endl;
             return 0;
         } else {
+            std::cerr << "Unexpected error during authentication" << std::endl;
             return 1;
         }
     } catch (auth::AuthException a) {
@@ -86,133 +78,47 @@ int main(int argc, char** argv)
         return 1;
     }
 
-    std::vector<std::string> dir;
-
     while (true) {
         std::cout << std::endl;
         std::cout << "> ";
         getline(std::cin, user_command);
         std::vector<std::string> splits = split_string(user_command, " ");
 
-        if (user_command == "help") {
-            command::help(currentUser);
-        } else if (user_command == "exit") {
-            std::cout << "Fileserver closed. Goodbye " << currentUser.username << " :)" << std::endl;
-            return 0;
-        } else if (user_command == "pwd") {
-            std::cout << command::pwd(dir) << std::endl;
-        } else if (user_command.substr(0, 2) == "cd" && user_command.substr(2, 1) == " ") {
-            command::cd(currentUser, dir, user_command.substr(3));
-        } else if (user_command == "ls") {
-            command::ls(currentUser, dir);
-        } else if (user_command.substr(0,5) == "mkdir" && user_command.substr(5,1) == " " && !isWhitespace(user_command.substr(6)) ) {
-            command::makedir(currentUser, dir, user_command.substr(6));
-        } else if (user_command.rfind("share", 0) == 0) {
-            command::sharefile(currentUser, dir, user_command);
-        } else if (splits[0] == "cat") {
-            if (splits.size() < 2) {
-                std::cout << "Please provide filename" << std::endl;
-                continue;
+        try {
+            if (user_command == "help") {
+                command::help(currentUser);
+            } else if (user_command == "exit") {
+                std::cout << "Fileserver closed. Goodbye " << currentUser.username << " :)" << std::endl;
+                return 0;
+            } else if (user_command == "pwd") {
+                std::cout << command::pwd(dir) << std::endl;
+            } else if (user_command.substr(0, 2) == "cd" && user_command.substr(2, 1) == " ") {
+                command::cd(currentUser, dir, user_command.substr(3));
+            } else if (user_command == "ls") {
+                command::ls(currentUser, dir);
+            } else if (user_command.substr(0,5) == "mkdir" && user_command.substr(5,1) == " " && !isWhitespace(user_command.substr(6)) ) {
+                command::makedir(currentUser, dir, user_command.substr(6));
+            } else if (user_command.rfind("share", 0) == 0) {
+                command::sharefile(currentUser, dir, user_command);
+            } else if (splits[0] == "cat") {
+                std::string contents = command::cat(currentUser, splits[1], dir, splits);
+                std::cout << contents << std::endl;
+            } else if (splits[0] == "mkfile") {
+                size_t pos = user_command.find(" ", user_command.find(" ") + 1);
+                std::string file_contents = user_command.substr(pos + 1);
+                command::mkfile(currentUser, dir, file_contents, splits);
+            } else if (user_command.rfind("adduser", 0) == 0 && user_command.find(" ") != -1) {
+                std::string new_username = user_command.substr(user_command.find(" ")+1, -1);
+                command::adduser(currentUser, new_username);
+            } else {
+                std::cerr << "Invalid command." << std::endl;
             }
-
-            std::string curr_dir;
-            std::string curr_dir_hashed;
-            for (const std::string& str:dir) {
-                curr_dir.append(str);
-                curr_dir_hashed.append(auth::hash(str));
-                curr_dir.append("/");
-                curr_dir_hashed.append("/");
-            }
-
-            if (curr_dir.empty()) {
-                std::cout << "Forbidden" << std::endl;
-                continue;
-            }
-
-            if (splits[1].find("_publickey", 0) != std::string::npos || splits[1].find("_privatekey", 0) != std::string::npos || (splits[1].find("..", 0) != std::string::npos)) {
-                std::cout << "Forbidden" << std::endl;
-                continue;
-            }
-            
-            std::string catUsername = currentUser.username;
-            if (currentUser.isAdmin) {
-                catUsername = dir[0];
-            }
-            std::string contents = command::cat(currentUser, catUsername, splits[1], curr_dir_hashed);
-            std::cout << contents << std::endl;
-        } else if (splits[0] == "mkfile") {
-            if (splits.size() < 3 || splits[2].empty()) {
-                std::cout << "Filename and file contents cannot be empty" << std::endl;
-                continue;
-            }
-
-            std::string curr_dir;
-            std::string curr_dir_hashed;
-            for (const std::string& str:dir) {
-                curr_dir.append(str);
-                curr_dir_hashed.append(auth::hash(str));
-                curr_dir.append("/");
-                curr_dir_hashed.append("/");
-            }
-
-            if (curr_dir.empty() || curr_dir.rfind("shared", 0) == 0) {
-                std::cout << "Forbidden" << std::endl;
-                continue;
-            }
-
-            if (splits[1].find("_publickey", 0) != std::string::npos || splits[1].find("_privatekey", 0) != std::string::npos || (splits[1].find("..", 0) != std::string::npos)) {
-                std::cout << "Forbidden" << std::endl;
-                continue;
-            }
-
-            size_t pos = user_command.find(" ", user_command.find(" ") + 1);
-            std::string file_contents = user_command.substr(pos + 1);
-
-            if (strlen(file_contents.c_str()) > 300) {
-                std::cout << "Max file content allowed is 300 characters" << std::endl;
-                continue;
-            }
-
-            command::mkfile(currentUser, splits[1], curr_dir_hashed, file_contents);
-        } else if (user_command.rfind("adduser", 0) == 0) {
-            if (!currentUser.isAdmin) {
-                std::cout << "Forbidden. Only Admin can perform adduser command." << std::endl;
-                continue; 
-            }
-            size_t pos = user_command.find(" ");
-            if (pos == -1) {
-                // to counter malicious input: adduser
-                std::cout << "No new username provided." << std::endl;
-                continue;
-            }
-            std::string new_username = user_command.substr(pos+1, -1);
-            if (new_username == "") {
-                // to counter malicious input: adduser 
-                std::cout << "No new username provided." << std::endl;
-                continue;
-            }
-            if (new_username.length() > 10) {
-                std::cout << "Invalid new username. Maximum 10 characters." << std::endl;
-                continue;
-            }
-            if (strcasecmp(new_username.c_str(),"admin") == 0) {
-                std::cout << "Invalid new username: " << new_username << std::endl;
-                continue;
-            }
-            if (!check_invalid_username(new_username)) {
-                std::cout << "Invalid new username. Only alphabets and numbers are allowed in a username." << std::endl;
-                continue;
-            }
-            struct stat st;
-            std::string root_folder_path = "filesystem/" + auth::hash(new_username);
-            if (stat(&root_folder_path[0], &st) != -1) {
-                std::cout << "User " << new_username << " already exists" << std::endl;
-                continue;
-            }
-            //passed all exception checks, now we create new user
-            command::adduser(currentUser, new_username);
-        } else {
-            std::cout << "Invalid command." << std::endl;
+        } catch (command::CommandException c) {
+            std::cerr << c.what() << std::endl;
+            continue;
+        } catch (auth::AuthException a) {
+            std::cerr << a.what() << std::endl;
+            continue;
         }
     }
 

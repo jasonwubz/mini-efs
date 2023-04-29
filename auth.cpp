@@ -75,7 +75,6 @@ RSA *auth::User::private_key_by_name()
     if (privateKey != NULL) {
         return privateKey;
     }
-    std::cout << "DEBUG:" << keyName + "_privatekey" << std::endl;
     std::string path;
     if (isAdmin) {
         path = auth::hash(keyName + "_privatekey");
@@ -128,7 +127,6 @@ int auth::decrypt(int flen, unsigned char *from, unsigned char *to, RSA *key, in
 // Get RSA (public or private) key specified by path
 RSA *auth::get_key(int type, std::string path)
 {
-    std::cout << "DEBUG:" << path << std::endl;
     FILE *fp  = NULL;
     RSA *key = NULL;
 
@@ -145,8 +143,6 @@ RSA *auth::get_key(int type, std::string path)
         fclose(fp);
     }
 
-    std::cout << "DEBUG: file opened" << path << std::endl;
-
     return key;
 }
 
@@ -154,7 +150,7 @@ void auth::save_file(std::string filename, char *content, size_t n)
 {
     FILE *fp = fopen(&filename[0], "wb");
     if (fp == nullptr) {
-        std::cout << "Unable to create file, please check directory permissions" << std::endl;
+        std::cerr << "Unable to create file, please check directory permissions" << std::endl;
         return;
     }
     fwrite(content, sizeof(*content), n, fp);
@@ -204,8 +200,6 @@ int auth::authenticate(std::string key_name)
     char message[] = "My secret";
     char *encryptedContent = NULL;
     char *decryptedContent = NULL;
-
-    std::cout << "DEBUG: checking secret" << std::endl;
 
     // Do RSA encryption using public key
     encryptedContent = (char *)malloc(RSA_size(publicKey));
@@ -292,8 +286,6 @@ void auth::create_keypair(std::string key_name)
 
     // generate public key and store to local
     _create_key(AUTH_KEY_TYPE_PUBLIC, publickey_path, keypair);
-
-    std::cout << "DEBUG:" << username << std::endl;
 
     if (username == "admin") {
         privatekey_path = privatekey_name_sha;
