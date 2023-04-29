@@ -20,9 +20,12 @@ namespace auth
         bool isAdmin;
         std::string keyName;
         std::string username;
+        std::string usernameHashed;
         RSA *publicKey;
         RSA *privateKey;
         void set_user(std::string username, std::string keyName = "");
+        int encryptSave(char *contents, std::string path);
+        char *decrypt(char *encryptedContents);
         RSA *private_key_by_name();
         RSA *get_key(int type);
     };

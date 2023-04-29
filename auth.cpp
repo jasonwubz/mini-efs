@@ -44,6 +44,43 @@ void auth::User::set_user(std::string u, std::string k)
     if (k.length() > 0) {
         keyName = k;
     }
+    if (username.length() > 0) {
+        usernameHashed = auth::hash(username);
+    }
+}
+
+// Encrypt and save file for user, returns 0 on success and -1 on error
+int auth::User::encryptSave(char *contents, std::string path)
+{
+    RSA *key = get_key(AUTH_KEY_TYPE_PUBLIC);
+    if (key == NULL) {
+        return -1;
+    }
+
+    char* encryptedContent = (char *) malloc(RSA_size(key));
+    int encryptLength = auth::encrypt(sizeof(contents) + 1, (unsigned char *) contents, (unsigned char *) encryptedContent, key);
+    if (encryptLength == -1) {
+        return -1;
+    }
+    auth::save_file(path, encryptedContent, RSA_size(key));
+    free(encryptedContent);
+
+    return 0;
+}
+
+// Decrypt the content based on user's private key, returns decrypted bytes
+char *auth::User::decrypt(char *encryptedContents)
+{
+    RSA *key = get_key(AUTH_KEY_TYPE_PRIVATE);
+    size_t size = RSA_size(key);
+    
+    char *decryptedContent = new char[size];
+    int decryptLength = auth::decrypt(size, (unsigned char *) encryptedContents, (unsigned char *) decryptedContent, key);
+    if (decryptLength == -1) {
+        throw auth::AuthException("An error occurred during decryption");
+    }
+
+    return decryptedContent;
 }
 
 // Get user's RSA (public or private)

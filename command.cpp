@@ -27,7 +27,7 @@ std::string command::CommandException::what()
 
 bool _validate_username(std::string username)
 {
-    for (int i=0;i<username.length();i++) {
+    for (int i=0; i<username.length(); i++) {
         if (!std::isalpha(username[i]) && !std::isdigit(username[i])) {
             return false;
         }
@@ -58,9 +58,8 @@ void command::adduser(auth::User &currentUser, std::string username)
     if (stat(&root_folder_path[0], &st) != -1) {
         throw command::CommandException("User " + username + " already exists");
     }
-    //passed all exception checks, now we create new user
-
-    // create user folders
+    
+    // passed all exception checks, now we create new user
     int result = auth::user_setup(username);
     if (result) {
         throw command::CommandException("Error adding user");
@@ -70,57 +69,58 @@ void command::adduser(auth::User &currentUser, std::string username)
     if (randomKey.length() == 0) {
         throw command::CommandException("Error adding user");
     }
-    std::string key_name = username + "_" + randomKey;
+    std::string keyName = username + "_" + randomKey;
     
-    auth::create_keypair(key_name);
+    auth::create_keypair(keyName);
     std::cout << "User " << username << " Public/Private key pair has been created." << std::endl;
-    std::cout << "The private key_name is " << key_name << std::endl;
+    std::cout << "The private key_name is " << keyName << std::endl;
     std::cout << "Please give this key_name to user and let user know that it must be remained secret to him/herself only." << std::endl;
     std::cout << "User " << username << " can login by command: " << std::endl;
-    std::cout << "./fileserver " << key_name << std::endl << std::endl;
+    std::cout << "./fileserver " << keyName << std::endl << std::endl;
 }
 
 void command::ls(auth::User &currentUser, std::vector<std::string> &dir)
 {
     // construct current directory string
-    std::string cur_dir;
-    bool upper_dir = false;
+    std::string currentDirectory;
+    bool hasUpperDirectory = false;
     std::cout << "d -> ."<< std::endl;
     
     if (currentUser.isAdmin) {
-        cur_dir = std::filesystem::current_path().string() + "/filesystem/";
+        currentDirectory = std::filesystem::current_path().string() + "/filesystem/";
     } else{
-        cur_dir = std::filesystem::current_path().string() + "/filesystem/" + auth::hash(currentUser.username);
+        currentDirectory = std::filesystem::current_path().string() + "/filesystem/" + currentUser.usernameHashed;
     }
     for (std::string str : dir) {
         if (!str.empty()) {
-            cur_dir = cur_dir + '/' + auth::hash(str);
-            upper_dir = true;
+            currentDirectory = currentDirectory + "/" + auth::hash(str);
+            hasUpperDirectory = true;
         }
     }
-    if (upper_dir) {
+    if (hasUpperDirectory) {
         std::cout << "d -> .." << std::endl;
     }
     
     // iterate directory
-    const std::filesystem::path path = std::filesystem::u8path(cur_dir); // sanity check for encoding
-    for (const auto & entry : std::filesystem::directory_iterator(path)) {
+    const std::filesystem::path path = std::filesystem::u8path(currentDirectory); // sanity check for encoding
+    for (const auto &entry : std::filesystem::directory_iterator(path)) {
         std::string prefix;
-        std::string full_path = entry.path();
-        std::string sub_path = full_path.substr(cur_dir.length());
-        if (std::filesystem::is_directory(std::filesystem::status(full_path))) {
+        std::string displayName;
+        std::string entryPath = entry.path();
+        std::string subPath = entryPath.substr(currentDirectory.length());
+        if (std::filesystem::is_directory(std::filesystem::status(entryPath))) {
             prefix = "d -> ";
         } else {
             prefix = "f -> ";
         }
-        std::string display_path;
-        if (sub_path[0] == '/') {
-            display_path = metadata::get(full_path.substr(cur_dir.length() + 1));
+        
+        if (subPath[0] == '/') {
+            displayName = metadata::get(entryPath.substr(currentDirectory.length() + 1));
         } else {
-            display_path = metadata::get(full_path.substr(cur_dir.length()));
+            displayName = metadata::get(entryPath.substr(currentDirectory.length()));
         }
-        if (display_path != "") {
-            std::cout << prefix + display_path << std::endl;
+        if (displayName != "") {
+            std::cout << prefix + displayName << std::endl;
         }
     }
 }
@@ -195,7 +195,7 @@ void command::cd(auth::User &currentUser, std::vector<std::string> &dir, std::st
     // convert new directory to string in order to use std::filesystem functions
     std::string check_dir = std::filesystem::current_path().string() + "/" + "filesystem";
     if (!currentUser.isAdmin) {
-        check_dir = check_dir + "/" + auth::hash(currentUser.username);
+        check_dir = check_dir + "/" + currentUser.usernameHashed;
     }
     for (std::string str : new_dir) {
         if (!str.empty()) {
@@ -237,7 +237,7 @@ void command::makedir(auth::User &currentUser, std::vector<std::string>& dir, st
     } 
 
     metadata::write(auth::hash(new_dir),new_dir);
-    new_dir = std::filesystem::current_path().string() + "/filesystem/" + auth::hash(currentUser.username) + '/' + cur_dir.substr(1) + '/' + auth::hash(new_dir);
+    new_dir = std::filesystem::current_path().string() + "/filesystem/" + currentUser.usernameHashed + '/' + cur_dir.substr(1) + '/' + auth::hash(new_dir);
 
     char *dirname = strdup(new_dir.c_str());
     if (mkdir(dirname, AUTH_DIR_PERMISSION) == -1) {
@@ -259,16 +259,16 @@ void command::mkfile(auth::User &currentUser, std::vector<std::string> &dir, con
     }
 
     std::string filename = commands[1];
-    std::string logicanPath;
+    std::string logicalPath;
     std::string physicalPath;
-    for (const std::string& str:dir) {
-        logicanPath.append(str);
+    for (const std::string &str:dir) {
+        logicalPath.append(str);
         physicalPath.append(auth::hash(str));
-        logicanPath.append("/");
+        logicalPath.append("/");
         physicalPath.append("/");
     }
 
-    if (logicanPath.empty() || logicanPath.rfind("shared", 0) == 0) {
+    if (logicalPath.empty() || logicalPath.rfind("shared", 0) == 0) {
         throw command::CommandException("Forbidden");
     }
 
@@ -284,56 +284,32 @@ void command::mkfile(auth::User &currentUser, std::vector<std::string> &dir, con
         throw command::CommandException("Max file content allowed is 300 characters");
     }
 
-    std::string hashed_filename = auth::hash(filename);
-    metadata::write(hashed_filename, filename);
-    std::string full_path = "filesystem/" + auth::hash(currentUser.username) + "/" + physicalPath + hashed_filename;
+    std::string physicalFilename = auth::hash(filename);
+    metadata::write(physicalFilename, filename);
+    std::string savePath = "filesystem/" + currentUser.usernameHashed + "/" + physicalPath + physicalFilename;
 
-    char *message = new char[contents.length() + 1];
-    strcpy(message, contents.c_str());
+    char *contentsCopy = new char[contents.length() + 1];
+    strcpy(contentsCopy, contents.c_str());
 
-    char *encryptedContent;
-
-    RSA *public_key = currentUser.get_key(AUTH_KEY_TYPE_PUBLIC);
-
-    if (public_key == NULL) {
-        throw command::CommandException("Error! Public key not found or invalid");
-    }
-
-    encryptedContent = (char *)malloc(RSA_size(public_key));
-    int encrypt_length = auth::encrypt(strlen(message) + 1, (unsigned char *)message, (unsigned char *)encryptedContent, public_key);
-    if (encrypt_length == -1) {
+    if (currentUser.encryptSave(contentsCopy, savePath) == -1) {
         throw command::CommandException("An error occurred during encryption");
     }
 
-    auth::save_file(full_path, encryptedContent, RSA_size(public_key));
-
     // check for expected shared file and update it
-    std::string expected_path_suffix = "/" + auth::hash("shared") + "/" + auth::hash(currentUser.username) + "/" + hashed_filename;
-    for (const auto & entry : std::filesystem::directory_iterator("./filesystem")) {
-        std::string full_path = entry.path();
-        std::string shared_user = metadata::get(full_path.substr(13));
-        full_path += expected_path_suffix;
-        // cout << full_path << endl;
-        if (std::filesystem::exists(full_path)) {
-            RSA *target_public_key;
-            target_public_key = auth::get_key(AUTH_KEY_TYPE_PUBLIC, "./publickeys/" + auth::hash(shared_user + "_publickey"));
-            if (target_public_key == NULL) {
-                // for some reason, the target's public key is lost so we cannot update it
-                continue;
-            }
+    std::string expectedSuffix = "/" + auth::hash("shared") + "/" + currentUser.usernameHashed + "/" + physicalFilename;
 
-            char* share_encrypted_content = (char *)malloc(RSA_size(target_public_key));
-            int share_encrypt_length = auth::encrypt(contents.length() + 1, (unsigned char *)contents.c_str(), (unsigned char *)share_encrypted_content, target_public_key);
-            if (share_encrypt_length == -1) {
-                // failed to encrypt
-                continue;
-            }
-            auth::save_file(full_path, share_encrypted_content, RSA_size(target_public_key));
-            free(share_encrypted_content);
+    for (const auto &entry : std::filesystem::directory_iterator("./filesystem")) {
+        std::string entryPath = entry.path();
+        std::string sharedUserName = metadata::get(entryPath.substr(13));
+        entryPath += expectedSuffix;
+        // if file exists for user, then we create it
+        if (std::filesystem::exists(entryPath)) { 
+            auth::User sharedUser;
+            sharedUser.set_user(sharedUserName);
+            sharedUser.encryptSave(contentsCopy, entryPath);
         }
     }
-    free(encryptedContent);
-    delete[] message;
+    delete[] contentsCopy;
 
     std::cout << "File created successfully!" << std::endl;
 }
@@ -396,15 +372,15 @@ void command::sharefile(auth::User &currentUser, std::vector<std::string>& dir, 
         hashed_pwd += "/" + hashed_dir;
     }
 
-    std::string hashed_username = auth::hash(currentUser.username);
     std::string hashed_filename = auth::hash(filename);
-    std::string filepath = "./filesystem/" + hashed_username + hashed_pwd + "/" + hashed_filename;
+    std::string filepath = "./filesystem/" + currentUser.usernameHashed + hashed_pwd + "/" + hashed_filename;
 
     struct stat s;
-    if (stat(filepath.c_str(), &s) == 0) {
-        if (s.st_mode & S_IFDIR) {
-            throw command::CommandException("Cannot share a directory, please enter a file name");
-        }
+    if (
+        (stat(filepath.c_str(), &s)) == 0 &&
+        (s.st_mode & S_IFDIR)
+    ) {
+        throw command::CommandException("Cannot share a directory, please enter a file name");
     }
 
     char *rawContent = _get_raw_content(filepath);
@@ -417,53 +393,39 @@ void command::sharefile(auth::User &currentUser, std::vector<std::string>& dir, 
     auth::User targetUser;
     targetUser.set_user(targetUsername);
     
-    std::string private_key_path = "./filesystem/" + hashed_username + "/" + auth::hash(currentUser.keyName + "_privatekey");
+    std::string private_key_path = "./filesystem/" + currentUser.usernameHashed + "/" + auth::hash(currentUser.keyName + "_privatekey");
     if (private_key_path == filepath) {
         throw command::CommandException("You cannot share your private key.");
     }
 
-    RSA *private_key;
-    private_key = currentUser.get_key(AUTH_KEY_TYPE_PRIVATE);
-    if (private_key == NULL) {
-        throw command::CommandException("Error! Private key not found or invalid");
-    }
-
-    std::string hashed_target_username = auth::hash(targetUsername);
-
     // check that target username exists (a valid user have a public key)
-    RSA *targetPublicKey;
-    targetPublicKey = targetUser.get_key(AUTH_KEY_TYPE_PUBLIC);
-    if (targetPublicKey == NULL) {
+    if (targetUser.get_key(AUTH_KEY_TYPE_PUBLIC) == NULL) {
         throw command::CommandException("User '" + targetUsername + "' does not exists.");
     }
 
-    size_t fullSize = RSA_size(private_key);
     // decrypt file for copying
-    char *decryptedContent = new char[fullSize];
-    int decrypt_length = auth::decrypt(fullSize, (unsigned char *) rawContent, (unsigned char *) decryptedContent, private_key);
-    if (decrypt_length == -1) {
-        throw command::CommandException("An error occurred during file share");
-    }
-
-    // encrypt shared file with target's public key
-    char *encryptedContent = (char *)malloc(RSA_size(targetPublicKey));
-    int encryptLength = auth::encrypt(strlen(decryptedContent) + 1, (unsigned char *) decryptedContent, (unsigned char *) encryptedContent, targetPublicKey);
-    if (encryptLength == -1) {
-        throw command::CommandException("An error occurred during file share");
+    char *decryptedContent;
+    try {
+        decryptedContent = currentUser.decrypt(rawContent);
+    } catch (auth::AuthException a) {
+        throw command::CommandException("An error occured while attempting to share file");
     }
 
     // Create directory if it doesn't exist
-    std::string targetDirectory = "./filesystem/" + hashed_target_username + "/" + auth::hash("shared") + "/" + hashed_username;
+    std::string targetDirectory = "./filesystem/" + targetUser.usernameHashed + "/" + auth::hash("shared") + "/" + currentUser.usernameHashed;
     if (!std::filesystem::is_directory(std::filesystem::status(targetDirectory))) {
-        int dir_create_status = mkdir(&targetDirectory[0], AUTH_DIR_PERMISSION);
-        if (dir_create_status != 0) {
+        if (mkdir(&targetDirectory[0], AUTH_DIR_PERMISSION) != 0) {
             throw command::CommandException("An error occurred during file share");
         }
     }
 
-    // now write new file
+    // now encrypt and save new file
     std::string targetPath = targetDirectory + "/" + hashed_filename;
-    auth::save_file(targetPath, encryptedContent, RSA_size(targetPublicKey));
+    if (targetUser.encryptSave(decryptedContent, targetPath) == -1) {
+        throw command::CommandException("An error occurred during file share");
+    }
+    
+    delete[] decryptedContent;
 
     std::cout << "File has been successfully shared" << std::endl;
 }
