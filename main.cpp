@@ -15,30 +15,6 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 
-std::vector<std::string> split_string(const std::string& ipstr, const std::string& delimiter)
-{
-    size_t pos;
-    std::string token;
-    std::string ipstrcpy = ipstr;
-    std::vector<std::string> splits;
-    while ((pos = ipstrcpy.find(delimiter)) != std::string::npos) {
-        token = ipstrcpy.substr(0, pos);
-        splits.push_back(token);
-        ipstrcpy.erase(0, pos + delimiter.length());
-    }
-    splits.push_back(ipstrcpy);
-    return splits;
-}
-
-bool isWhitespace(std::string s)
-{
-    for (int index = 0; index < s.length(); index++) {
-        if(!std::isspace(s[index]))
-            return false;
-    }
-    return true;
-}
-
 int main(int argc, char** argv)
 {
     std::string command;
@@ -82,34 +58,33 @@ int main(int argc, char** argv)
         std::cout << std::endl;
         std::cout << "> ";
         getline(std::cin, command);
-        std::vector<std::string> splits = split_string(command, " ");
+        std::vector<std::string> arguments = command::parse_command(command);
 
         try {
-            if (command == "help") {
+            if (command == "") {
+                continue;
+            } else if (command == "help") {
                 command::help(currentUser);
             } else if (command == "exit") {
                 std::cout << "Fileserver closed. Goodbye " << currentUser.username << " :)" << std::endl;
                 return 0;
             } else if (command == "pwd") {
                 std::cout << command::pwd(dir) << std::endl;
-            } else if (command.substr(0, 2) == "cd" && command.substr(2, 1) == " ") {
-                command::cd(currentUser, dir, command.substr(3));
+            } else if (command == "cd") {
+                command::cd(currentUser, dir, arguments);
             } else if (command == "ls") {
                 command::ls(currentUser, dir);
-            } else if (command.substr(0,5) == "mkdir" && command.substr(5,1) == " " && !isWhitespace(command.substr(6)) ) {
-                command::makedir(currentUser, dir, command.substr(6));
-            } else if (command.rfind("share", 0) == 0) {
-                command::sharefile(currentUser, dir, command);
-            } else if (splits[0] == "cat") {
-                std::string contents = command::cat(currentUser, splits[1], dir, splits);
+            } else if (command == "mkdir") {
+                command::makedir(currentUser, dir, arguments);
+            } else if (command == "share") {
+                command::share(currentUser, dir, arguments);
+            } else if (command == "cat") {
+                std::string contents = command::cat(currentUser, dir, arguments);
                 std::cout << contents << std::endl;
-            } else if (splits[0] == "mkfile") {
-                size_t pos = command.find(" ", command.find(" ") + 1);
-                std::string file_contents = command.substr(pos + 1);
-                command::mkfile(currentUser, dir, file_contents, splits);
-            } else if (command.rfind("adduser", 0) == 0 && command.find(" ") != -1) {
-                std::string new_username = command.substr(command.find(" ")+1, -1);
-                command::adduser(currentUser, new_username);
+            } else if (command == "mkfile") {
+                command::mkfile(currentUser, dir, arguments);
+            } else if (command == "adduser") {
+                command::adduser(currentUser, arguments);
             } else {
                 std::cerr << "Invalid command." << std::endl;
             }

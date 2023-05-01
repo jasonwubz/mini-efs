@@ -3,3 +3,4 @@
 !*.cpp
 !README.md
 !CMakeLists.txt
+!src
