@@ -15,7 +15,7 @@ Compile and prepare the binary:
 cd /your-path-to/mini-efs
 
 # compile headers
-g++ -c -I. auth.cpp command.cpp metadata.cpp
+g++ -c -I. src/auth.cpp src/command.cpp src/metadata.cpp
 
 # compile main program as fileserver
 g++ -I. auth.o command.o metadata.o main.cpp -o fileserver -lcrypto -ljsoncpp
