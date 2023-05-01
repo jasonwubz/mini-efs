@@ -58,7 +58,7 @@ int auth::User::encryptSave(char *contents, std::string path)
     }
 
     char* encryptedContent = (char *) malloc(RSA_size(key));
-    int encryptLength = auth::encrypt(sizeof(contents) + 1, (unsigned char *) contents, (unsigned char *) encryptedContent, key);
+    int encryptLength = auth::encrypt(strlen(contents) + 1, (unsigned char *) contents, (unsigned char *) encryptedContent, key);
     if (encryptLength == -1) {
         return -1;
     }
@@ -239,14 +239,14 @@ int auth::authenticate(std::string key_name)
 
     // Do RSA encryption using public key
     encryptedContent = (char *)malloc(RSA_size(publicKey));
-    int encryptLength = auth::encrypt(strlen(message) + 1, (unsigned char *)message, (unsigned char *)encryptedContent, publicKey);
+    int encryptLength = auth::encrypt(strlen(message) + 1, (unsigned char *) message, (unsigned char *) encryptedContent, publicKey);
     if (encryptLength == -1) {
         return 1;
     }
     
     // Try to do RSA decryption using corresponding private key
     decryptedContent = (char *)malloc(encryptLength);
-    int decryptLength = auth::decrypt(encryptLength, (unsigned char *)encryptedContent, (unsigned char *)decryptedContent, privateKey);
+    int decryptLength = auth::decrypt(encryptLength, (unsigned char *) encryptedContent, (unsigned char *) decryptedContent, privateKey);
     if (decryptLength == -1) {
         return 1;
     }

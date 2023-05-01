@@ -43,7 +43,7 @@ int main(int argc, char** argv)
             std::cout << "Your private key_name is " << key_name << std::endl;
             std::cout << "Please store your key_name safely. Admin can login by command: " << std::endl;
             std::cout << "./fileserver " << key_name << std::endl << std::endl;
-            std::cout << "Initial setup finshed, Fileserver closed. Admin now can login using the admin keyfile" << std::endl;
+            std::cout << "Initial setup finished. Fileserver closed. Admin now can login using the admin keyfile" << std::endl;
             return 0;
         } else {
             std::cerr << "Unexpected error during authentication" << std::endl;
