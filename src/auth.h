@@ -10,6 +10,9 @@
 #define AUTH_KEY_TYPE_PUBLIC 1
 #define AUTH_KEY_TYPE_PRIVATE 2
 
+// DO NOT EDIT THIS VALUE
+#define AUTH_MAX_CHUNK_SIZE 470
+
 namespace auth
 {
     extern const std::string AUTH_DIR_FILESYSTEM;

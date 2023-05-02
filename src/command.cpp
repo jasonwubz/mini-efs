@@ -416,8 +416,8 @@ void command::mkfile(auth::User &currentUser, std::vector<std::string> &dir, con
         throw command::CommandException("Forbidden");
     }
 
-    if (strlen(contents.c_str()) > 300) {
-        throw command::CommandException("Max file content allowed is 300 characters");
+    if (strlen(contents.c_str()) > AUTH_MAX_CHUNK_SIZE) {
+        throw command::CommandException("Max file content allowed is " + std::to_string(AUTH_MAX_CHUNK_SIZE) + " characters");
     }
 
     std::string physicalFilename = auth::hash(filename);

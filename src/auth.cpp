@@ -99,7 +99,7 @@ RSA *auth::User::get_key(int type)
         if (privateKey != NULL) {
             return privateKey;
         }
-        path = auth::AUTH_DIR_PRIVATEKEYS + "/" + auth::hash(username);
+        path = auth::AUTH_DIR_PRIVATEKEYS + "/" + usernameHashed;
         privateKey = auth::get_key(type, path);
         return privateKey;
     }
@@ -116,7 +116,7 @@ RSA *auth::User::private_key_by_name()
     if (isAdmin) {
         path = auth::hash(keyName + "_privatekey");
     } else {
-        path = auth::AUTH_DIR_FILESYSTEM + "/" + auth::hash(username) + "/" + auth::hash(keyName + "_privatekey");
+        path = auth::AUTH_DIR_FILESYSTEM + "/" + usernameHashed + "/" + auth::hash(keyName + "_privatekey");
     }
 
     privateKey = auth::get_key(AUTH_KEY_TYPE_PRIVATE, path);
@@ -219,7 +219,7 @@ int auth::authenticate(std::string key_name)
     std::string username;
 
     size_t pos = key_name.find("_");
-    username = key_name.substr(0,pos);
+    username = key_name.substr(0, pos);
     unauthUser.set_user(username, key_name);
     
     publicKey = unauthUser.get_key(AUTH_KEY_TYPE_PUBLIC);
@@ -238,14 +238,14 @@ int auth::authenticate(std::string key_name)
     char *decryptedContent = NULL;
 
     // Do RSA encryption using public key
-    encryptedContent = (char *)malloc(RSA_size(publicKey));
+    encryptedContent = (char *) malloc(RSA_size(publicKey));
     int encryptLength = auth::encrypt(strlen(message) + 1, (unsigned char *) message, (unsigned char *) encryptedContent, publicKey);
     if (encryptLength == -1) {
         return 1;
     }
     
     // Try to do RSA decryption using corresponding private key
-    decryptedContent = (char *)malloc(encryptLength);
+    decryptedContent = (char *) malloc(encryptLength);
     int decryptLength = auth::decrypt(encryptLength, (unsigned char *) encryptedContent, (unsigned char *) decryptedContent, privateKey);
     if (decryptLength == -1) {
         return 1;
