@@ -11,7 +11,7 @@
 #define AUTH_KEY_TYPE_PRIVATE 2
 
 // DO NOT EDIT THIS VALUE
-#define AUTH_MAX_CHUNK_SIZE 470
+#define AUTH_MAX_CHUNK_SIZE 460
 
 namespace auth
 {
@@ -19,7 +19,7 @@ namespace auth
     extern const std::string AUTH_DIR_PUBLICKEYS;
     extern const std::string AUTH_DIR_PRIVATEKEYS;
 
-    struct User{
+    struct User {
         bool isAdmin;
         std::string keyName;
         std::string username;
@@ -28,7 +28,7 @@ namespace auth
         RSA *privateKey;
         void set_user(std::string username, std::string keyName = "");
         int encryptSave(char *contents, std::string path);
-        char *decrypt(char *encryptedContents);
+        char *decrypt(char *encryptedContents, int fSize = 0);
         RSA *private_key_by_name();
         RSA *get_key(int type);
     };
