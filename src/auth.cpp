@@ -15,6 +15,7 @@
 #include <iomanip>
 #include <sys/stat.h>
 #include <jsoncpp/json/json.h>
+#include <math.h>
 
 const std::string auth::AUTH_DIR_FILESYSTEM = "filesystem";
 const std::string auth::AUTH_DIR_PUBLICKEYS = "publickeys";
@@ -57,30 +58,88 @@ int auth::User::encryptSave(char *contents, std::string path)
         return -1;
     }
 
-    char* encryptedContent = (char *) malloc(RSA_size(key));
-    int encryptLength = auth::encrypt(strlen(contents) + 1, (unsigned char *) contents, (unsigned char *) encryptedContent, key);
-    if (encryptLength == -1) {
-        return -1;
+    int remainingSize = strlen(contents);
+
+    int keySize = RSA_size(key); // size of each encrypted chunk
+
+    float chunksCount = ceil((float) strlen(contents) / AUTH_MAX_CHUNK_SIZE);
+    int expectedFullSize = (int) chunksCount * keySize;
+
+    char *fullContent = (char *) malloc(expectedFullSize);
+    int chunkOffset = 0;
+
+    char *encryptedContent = (char *) malloc(keySize);
+    
+    for (size_t i = 0; i < chunksCount; i++) {
+        int chunkSize = 0;
+
+        if (remainingSize >= AUTH_MAX_CHUNK_SIZE) {
+            chunkSize = AUTH_MAX_CHUNK_SIZE;
+            remainingSize -= AUTH_MAX_CHUNK_SIZE;
+        } else {
+            chunkSize = remainingSize;
+        }
+
+        char *chunkContent = (char *) malloc(chunkSize + 1);
+
+        memset(chunkContent, 0, chunkSize + 1);
+        memset(encryptedContent, 0, keySize);
+
+        memcpy(chunkContent, &contents[chunkOffset], chunkSize);
+
+        int encryptLength = auth::encrypt(strlen(chunkContent) + 1, (unsigned char *) chunkContent, (unsigned char *) encryptedContent, key);
+        if (encryptLength == -1) {
+            return -1;
+        }
+
+        int contentOffset = (keySize * i);
+        memcpy(&fullContent[contentOffset], encryptedContent, encryptLength);
+
+        chunkOffset += AUTH_MAX_CHUNK_SIZE;
+        free(chunkContent);
     }
-    auth::save_file(path, encryptedContent, RSA_size(key));
+
+    auth::save_file(path, fullContent, expectedFullSize);
+    free(fullContent);
     free(encryptedContent);
 
     return 0;
 }
 
 // Decrypt the content based on user's private key, returns decrypted bytes
-char *auth::User::decrypt(char *encryptedContents)
+char *auth::User::decrypt(char *encryptedContents, int fSize)
 {
     RSA *key = get_key(AUTH_KEY_TYPE_PRIVATE);
-    size_t size = RSA_size(key);
-    
-    char *decryptedContent = new char[size];
-    int decryptLength = auth::decrypt(size, (unsigned char *) encryptedContents, (unsigned char *) decryptedContent, key);
-    if (decryptLength == -1) {
-        throw auth::AuthException("An error occurred during decryption");
+    int keySize = RSA_size(key);
+
+    if (fSize <= 0) {
+        fSize = keySize;
     }
 
-    return decryptedContent;
+    int chunksCount = ceil((float) fSize / keySize);
+    char *fullContent = (char *) malloc(fSize);
+    memset(fullContent, 0, fSize);
+
+    int chunkOffset = 0;
+
+    for (size_t i = 0; i < chunksCount; i++) {
+        char *decryptedContent = (char *) malloc(keySize);
+        char *chunkEncrypted = (char *) malloc(keySize);
+        memcpy(chunkEncrypted, &encryptedContents[chunkOffset], keySize);
+
+        int decryptLength = auth::decrypt(keySize, (unsigned char *) chunkEncrypted, (unsigned char *) decryptedContent, key);
+        if (decryptLength == -1) {
+            throw auth::AuthException("An error occurred during decryption");
+        }
+
+        strcat(fullContent, decryptedContent);
+        free(decryptedContent);
+        free(chunkEncrypted);
+
+        chunkOffset += keySize;
+    }
+
+    return fullContent;
 }
 
 // Get user's RSA (public or private)

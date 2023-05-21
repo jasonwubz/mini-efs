@@ -416,7 +416,8 @@ void command::mkfile(auth::User &currentUser, std::vector<std::string> &dir, con
         throw command::CommandException("Forbidden");
     }
 
-    if (strlen(contents.c_str()) > AUTH_MAX_CHUNK_SIZE) {
+    // TEMP: increase the size limit because we can now handle chunks
+    if (strlen(contents.c_str()) > (AUTH_MAX_CHUNK_SIZE * 100)) {
         throw command::CommandException("Max file content allowed is " + std::to_string(AUTH_MAX_CHUNK_SIZE) + " characters");
     }
 
@@ -450,7 +451,7 @@ void command::mkfile(auth::User &currentUser, std::vector<std::string> &dir, con
 }
 
 // Get the raw content of a file
-char *_get_raw_content(std::string path)
+char *_get_raw_content(std::string path, int &fSize)
 {
     char *fileContent;
 
@@ -461,11 +462,11 @@ char *_get_raw_content(std::string path)
         throw command::CommandException("File does not exists");
     }
     ifs.seekg(0, std::ios::end);
-    size_t fileSize = ifs.tellg();
+    fSize = ifs.tellg();
     ifs.seekg(0, std::ios::beg);
 
-    fileContent = new char[fileSize];
-    ifs.read(fileContent, fileSize);
+    fileContent = new char[fSize];
+    ifs.read(fileContent, fSize);
     ifs.close();
 
     return fileContent;
@@ -501,7 +502,8 @@ void command::share(auth::User &currentUser, std::vector<std::string>& dir, cons
         throw command::CommandException("Cannot share a directory, please enter a file name");
     }
 
-    char *rawContent = _get_raw_content(filepath);
+    int rSize;
+    char *rawContent = _get_raw_content(filepath, rSize);
 
     // check that the user cannot share to themselves
     if (targetUsername == currentUser.username) {
@@ -524,7 +526,7 @@ void command::share(auth::User &currentUser, std::vector<std::string>& dir, cons
     // decrypt file for copying
     char *decryptedContent;
     try {
-        decryptedContent = currentUser.decrypt(rawContent);
+        decryptedContent = currentUser.decrypt(rawContent, rSize);
     } catch (auth::AuthException a) {
         throw command::CommandException("An error occured while attempting to share file");
     }
@@ -543,7 +545,8 @@ void command::share(auth::User &currentUser, std::vector<std::string>& dir, cons
         throw command::CommandException("An error occurred during file share");
     }
     
-    delete[] decryptedContent;
+    free(decryptedContent);
+    delete[] rawContent;
 
     std::cout << "File has been successfully shared" << std::endl;
 }
@@ -598,18 +601,20 @@ std::string command::cat(auth::User &currentUser, std::vector<std::string> &dir,
         throw command::CommandException("Cannot open a directory, please enter a file name");
     }
 
-    char *rawContent = _get_raw_content(fullPath);
+    int rSize;
+    char *rawContent = _get_raw_content(fullPath, rSize);
     char *decryptedContent;
 
     if (currentUser.isAdmin) {
         auth::User catUser;
         catUser.set_user(catUsername);
-        decryptedContent = catUser.decrypt(rawContent);
+        decryptedContent = catUser.decrypt(rawContent, rSize);
     } else {
-        decryptedContent = currentUser.decrypt(rawContent);
+        decryptedContent = currentUser.decrypt(rawContent, rSize);
     }
 
     std::string output = decryptedContent;
     free(decryptedContent);
+    delete[] rawContent;
     return output;
 }

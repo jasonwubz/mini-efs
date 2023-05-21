@@ -5,15 +5,7 @@
 #include <cstdlib>
 #include <string.h>
 #include <vector>
-#include <algorithm>
-#include <filesystem>
-#include <regex>
 #include <iostream>
-#include <sstream>
-#include <fstream>
-#include <iomanip>
-#include <sys/stat.h>
-#include <sys/types.h>
 
 int main(int argc, char** argv)
 {
